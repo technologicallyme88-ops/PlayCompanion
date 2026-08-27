@@ -1,6 +1,7 @@
-# r4 custom companion order. Removed Lumen (moth) and Sprig (sprout).
-# Existing Lumen id 3 now maps to Noodle; legacy Sprig id 4 is migrated on boot.
+# r11 companion order. Sprig and Lumen remain removed.
+# Existing ids 0-3 are preserved; Lincoln is appended as id 4.
 sophocles
 vellum
 octavo
 noodle
+lincoln

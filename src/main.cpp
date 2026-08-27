@@ -432,9 +432,9 @@ void setup() {
 
   SETTINGS.loadFromFile();
   // r4 companion migration: Lumen (old id 3) is replaced by Noodle, and
-  // Sprig (old id 4) no longer exists. Any stale/invalid companion id
-  // therefore resolves to Noodle (id 3) rather than another character.
-  if (SETTINGS.companionId >= 4) SETTINGS.companionId = 3;
+  // Sprig previously used legacy id 4, which is now Lincoln in r11. Only
+  // truly out-of-range ids resolve to Noodle (id 3).
+  if (SETTINGS.companionId >= 5) SETTINGS.companionId = 3;
   APP_STATE.loadFromFile();
   RECENT_BOOKS.loadFromFile();
   I18N.setLanguage(static_cast<Language>(SETTINGS.language));

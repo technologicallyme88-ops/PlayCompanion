@@ -1,6 +1,6 @@
 # Companion artwork
 
-This is the editable artwork folder for every Companion in Play+Companion r8.
+This is the editable artwork folder for every Companion in Play+Companion r11.
 
 ## Characters
 
@@ -8,6 +8,7 @@ This is the editable artwork folder for every Companion in Play+Companion r8.
 - `vellum/` — ghost
 - `octavo/` — robot
 - `noodle/` — dog
+- `lincoln/` — dog (Labrador)
 
 Each character has four required files:
 

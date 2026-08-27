@@ -870,7 +870,7 @@ void HomeActivity::drawCompanionColumn(const Rect region, const char* label, con
 
   const auto id = CompanionTracker::activeId();
   const auto mood = COMPANION.currentMood();
-  const bool noodle = id == companion::CompanionId::Noodle;
+  const bool useInkBounds = id == companion::CompanionId::Noodle || id == companion::CompanionId::Lincoln;
 
   const int colX = region.x + MARGIN;
   const int colW = region.width - MARGIN * 2;
@@ -903,10 +903,10 @@ void HomeActivity::drawCompanionColumn(const Rect region, const char* label, con
   const int statusBlock = LABEL_GAP + labelH + SUBLABEL_GAP + (sub[0] != '\0' ? subH : 0);
 
   int scale = 0;
-  const int maxScale = noodle ? MAX_NOODLE_SCALE : MAX_SCALE;
+  const int maxScale = useInkBounds ? MAX_NOODLE_SCALE : MAX_SCALE;
   for (int candidate = maxScale; candidate >= 1; candidate--) {
-    const int candidateW = noodle ? companion::poseInkWidth(id, mood, candidate) : companion::poseWidth(candidate);
-    const int candidateH = noodle ? companion::poseInkHeight(id, mood, candidate) : companion::poseHeight(candidate);
+    const int candidateW = useInkBounds ? companion::poseInkWidth(id, mood, candidate) : companion::poseWidth(candidate);
+    const int candidateH = useInkBounds ? companion::poseInkHeight(id, mood, candidate) : companion::poseHeight(candidate);
     if (candidateW + WALK_TRAVEL > colW) continue;
     if (bubbleBlock + candidateH + BOB_HEIGHT + statusBlock <= colH) {
       scale = candidate;
@@ -915,8 +915,8 @@ void HomeActivity::drawCompanionColumn(const Rect region, const char* label, con
   }
   if (scale == 0) return;
 
-  const int spriteW = noodle ? companion::poseInkWidth(id, mood, scale) : companion::poseWidth(scale);
-  const int spriteH = noodle ? companion::poseInkHeight(id, mood, scale) : companion::poseHeight(scale);
+  const int spriteW = useInkBounds ? companion::poseInkWidth(id, mood, scale) : companion::poseWidth(scale);
+  const int spriteH = useInkBounds ? companion::poseInkHeight(id, mood, scale) : companion::poseHeight(scale);
   const int blockH = bubbleBlock + spriteH + BOB_HEIGHT + statusBlock;
   const int blockTop = colTop + (colH - blockH) / 2;
 
