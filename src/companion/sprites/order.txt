@@ -1,0 +1,6 @@
+# r4 custom companion order. Removed Lumen (moth) and Sprig (sprout).
+# Existing Lumen id 3 now maps to Noodle; legacy Sprig id 4 is migrated on boot.
+sophocles
+vellum
+octavo
+noodle

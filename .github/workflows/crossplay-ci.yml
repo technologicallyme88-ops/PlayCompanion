@@ -1,0 +1,87 @@
+# CrossPlay's own CI.
+#
+# Upstream's ci.yml only fires on pushes to `master`, which this fork does not
+# have, so without this the default branch had no checks at all and the repo
+# front page said nothing about whether HEAD compiles. It has been wrong before:
+# `xteink` once did not build for three commits because every local check.sh ran
+# against a dirty tree.
+#
+# Deliberately narrow. It builds the firmware and the simulator and runs the
+# host suites, and it does not try to reproduce clang-format or cppcheck --
+# those are upstream's jobs, they run on every pull request already, and a
+# second copy would only drift.
+name: CrossPlay
+
+on:
+  push:
+    branches: [xteink]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+
+      - name: Install PlatformIO Core
+        run: uv pip install --system -U https://github.com/pioarduino/platformio-core/archive/refs/tags/v6.1.19.zip
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      # The simulator links against SDL2, and on Linux its MD5Builder is a thin
+      # wrapper over OpenSSL (CommonCrypto on macOS). The firmware needs
+      # neither. Both are usually present on the runner; naming them here is
+      # what stops a runner image change from looking like our bug.
+      - name: Install the simulator's host libraries
+        run: sudo apt-get update && sudo apt-get install -y libsdl2-dev libssl-dev
+
+      # The two flags only add .su and .ci files beside the objects; they change
+      # no code, so this is still the build the next step checks. Asking for them
+      # here rather than in a second build keeps CI one firmware compile long.
+      - name: Build the firmware
+        run: PLATFORMIO_BUILD_FLAGS="-fstack-usage -fcallgraph-info=su" pio run -e x4pro
+
+      # v1.0.0 shipped a render task that needed 8016 bytes of an 8192-byte
+      # stack and crashed on the first device that ever ran it. Nothing here
+      # measured stack, and nothing on a host could: frame sizes belong to the
+      # target ABI. This reads the numbers the firmware compiler just emitted.
+      - name: Stack fits its task
+        run: python3 scripts_local/stack_budget.py --build-dir .pio/build/x4pro
+
+      - name: Build the simulator
+        run: pio run -e simulator_x4_pro
+
+      # Nothing is forgiven. ui:paperOnTheBand was a real baseline failure
+      # once, and this step carried a carefully shaped exemption for it until
+      # 2026-08-14 -- four days after the failure was fixed. In that window a
+      # regression in exactly that test would have passed CI with a warning
+      # while a local check.sh went red: the inverse of the CI-GCC gap this
+      # repo already got burned by. A forgiven suite that no longer fails is a
+      # door held open for the next regression.
+      #
+      # host-tests/ci/run.sh executes this step's actual text (extracted from
+      # this yaml, not copied) and asserts the no-forgiveness shape, so drift
+      # here fails a suite there.
+      - name: Host tests
+        run: |
+          for suite in host-tests/*/run.sh; do
+            bash "$suite"
+          done

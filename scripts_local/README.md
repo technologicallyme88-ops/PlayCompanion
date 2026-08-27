@@ -1,0 +1,83 @@
+# Workspace scripts
+
+The live copies. `../../scripts/*.sh` at the workspace root are symlinks to
+these, so `./scripts/dev.sh` and `firmware-next/scripts_local/dev.sh` both work.
+
+They live here because the workspace root is not a git repository and this
+directory is; keeping them outside meant the whole development loop was one `rm`
+from gone.
+
+| Script             | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `wt.sh`            | One worktree per piece of work in flight. `new <name>` makes one (own branch, own build output, own SD card, own screenshots); `list` shows what exists and what state; `drop <name>` removes it, refusing while work is unmerged.                                                                                                                                                                                                            |
+| `check.sh`         | Everything verifiable without a device: every host suite, then both builds. Run before every commit. `--tests` for suites only. `--committed` verifies HEAD in a throwaway worktree instead of your working tree. Reports each suite's own exit code, not just its last line. On the deploy branch it also fails when `site/emulator/` is older than the sources it was built from; `host-tests/checksh/` is that gate's own test.            |
+| `dev.sh`           | Mario's simulator. Watches the sources, rebuilds and restarts on change, reopens a closed window. Leave it running. Takes a worktree name (`dev.sh battleship`) to watch just that work; no argument watches the integration tree.                                                                                                                                                                                                            |
+| `sim-shot.sh`      | Scripted headless run for agents: drives taps and keys, captures screenshots, prints the activity trace. Set `SIM_LOG_GREP` to widen it (`SIM_LOG_GREP=.` for everything); the default hides `LOG_INF`/`LOG_DBG`.                                                                                                                                                                                                                             |
+| `mutate.sh`        | One mutation test, honestly. Distinguishes CAUGHT from SURVIVED from BUILD-FAIL from NO-MATCH, because the last two look exactly like the first two and were read as results three times in one session. Always restores the file.                                                                                                                                                                                                            |
+| `sim-link.sh`      | Two simulators at once, for local multiplayer. No args gives two interactive windows; with args, headless with `-a`/`-b` screenshot suffixes.                                                                                                                                                                                                                                                                                                 |
+| `sim.sh`           | One-shot interactive launch. Prefer `dev.sh`.                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `sync.sh`          | Reports how far behind CrossPoint's `develop` we are, computes (never lists) the files both sides changed to warn where the merge will conflict, and watches upstream's X4 Pro branch, whose landing is a sit-down merge (see LOCAL_SCOPE.md). `--apply` merges and verifies in a throwaway worktree at the committed tip, then lands as a fast-forward. Works with a dirty tree unless upstream touched a file you have uncommitted work in. |
+| `sim_catchup.py`   | Not run by hand. A `pre:` build hook that patches the fetched simulator library where it lags this branch. Prints when a patch stops applying, which is how we learn CrossPoint has fixed it.                                                                                                                                                                                                                                                 |
+| `stack-budget.sh`  | Proves every FreeRTOS task's deepest call path fits the stack it was given, from the `.su`/`.ci` files the firmware compiler emits. `--verbose` prints the deepest path. `stack_budget.py` is the implementation; CI's "Stack fits its task" step calls it directly.                                                                                                                                                                          |
+| `shoot-board.sh`   | Regenerates the Toy Battle board shot the site card uses. Every site image was once captured by hand and its recipe lost; these two keep theirs.                                                                                                                                                                                                                                                                                              |
+| `shoot-shell.sh`   | Photographs the shell end to end: menu, setup, map list, rules pages.                                                                                                                                                                                                                                                                                                                                                                         |
+| `lib-sim.sh`       | Not run directly. Shared setup sourced by `dev.sh`, `sim.sh`, `sim-shot.sh` and `sim-link.sh`; derives every path from the tree it lives in.                                                                                                                                                                                                                                                                                                  |
+| `sim_host_libs.py` | Not run by hand. Links the host libraries the simulator's own headers assume.                                                                                                                                                                                                                                                                                                                                                                 |
+
+## One tree per piece of work
+
+Several apps get built at once, so several trees exist at once: `firmware-next/`
+integrates, and each `wt/<name>/` is one effort's own worktree. Every path these
+scripts use is derived from the tree they were invoked in -- build output, build
+lock, build log, SD card, `qa-artifacts/` -- so two trees never collide.
+
+Two consequences worth knowing:
+
+- **Inside a `wt/` tree, use `./scripts_local/`, not the workspace-root
+  `./scripts/`.** Those symlinks resolve back to `firmware-next` from anywhere,
+  so the root copy would build and photograph the integration tree while you
+  believed you were testing your own. It boots fine and every tap lands
+  somewhere else, which is indistinguishable from the feature being broken. The
+  scripts refuse rather than let that happen quietly.
+- **The PlatformIO object cache is shared** at `../.pio-cache` via
+  `PLATFORMIO_BUILD_CACHE_DIR`. It is 7.6GB and content-addressed, so a brand
+  new worktree's first build is mostly cache hits instead of a cold compile.
+
+### What "integration" actually means
+
+`firmware-next/` is for the merge and what the merge forces, and nothing else:
+
+- `git merge app/<name>` and resolving its conflicts;
+- rebuilding `site/emulator/` from the merged tree, because both sides' binaries
+  conflict and neither of them is right;
+- the version bump and the release tag.
+
+Everything else is work and wants its own tree, **including the things that feel
+like plumbing**: a new script, a new `check.sh` stage, a build fix, a rewritten
+doc. If you are AUTHORING rather than reconciling, you are in the wrong tree.
+
+This needs saying because "it is only integration" is an easy thing to tell
+yourself. On 2026-08-14 it produced eight direct commits on `xteink` -- a
+screenshot recipe, a `check.sh` stage, two build fixes -- none of which were the
+merge or forced by it.
+
+**Two sessions in this tree at once is the normal case, not the exception.**
+Before touching it:
+
+```bash
+git status --short --ignore-submodules=untracked  # dirty means someone is mid-merge
+git log --first-parent origin/xteink..HEAD        # unpushed means the same
+```
+
+(`--ignore-submodules=untracked` because the icon tools drop a `__pycache__/`
+inside `freeink-sdk`, which otherwise reads as permanent dirt.)
+
+Either one means leave it alone. The cost is not hypothetical: that same day two
+windows independently diagnosed the same simulator build failure, because both
+were working in the shared tree and neither could see the other coming.
+
+Each simulator instance gets its own SD card via `CROSSPOINT_SIM_SD`: each
+tree's own `fs_agent/` for scripted runs, and `../fs_mario/` at the workspace
+root for Mario's, which sits outside every tree so his saves and settings follow
+him whichever one `dev.sh` is watching. All are gitignored, as is
+`qa-artifacts/` where screenshots land.
