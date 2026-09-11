@@ -1,6 +1,7 @@
 #include "BaseTheme.h"
 
 #include <FreeInkUIGfxRenderer.h>
+#include <BleKeyboardHost.h>
 #include <GfxRenderer.h>
 #include <HalClock.h>
 #include <HalGPIO.h>
@@ -30,6 +31,20 @@ constexpr int bookmarkStatusIconWidth = 16;
 constexpr int bookmarkStatusIconHeight = 14;
 constexpr int bookmarkStatusIconGap = 4;
 constexpr int bookmarkStatusIconTopCrop = 2;
+constexpr int bluetoothStatusIconWidth = 9;
+constexpr int bluetoothStatusIconHeight = 13;
+constexpr int bluetoothStatusIconGap = 5;
+
+void drawBluetoothStatusIcon(const GfxRenderer& renderer, const int x, const int y) {
+  // Tiny monochrome Bluetooth rune: vertical spine with the two opposing
+  // triangular strokes. Drawn from primitives so it does not depend on a font
+  // containing U+Bluetooth or add another bitmap asset.
+  renderer.drawLine(x + 4, y, x + 4, y + 12);
+  renderer.drawLine(x + 4, y, x + 7, y + 3);
+  renderer.drawLine(x + 7, y + 3, x + 1, y + 9);
+  renderer.drawLine(x + 1, y + 3, x + 7, y + 9);
+  renderer.drawLine(x + 7, y + 9, x + 4, y + 12);
+}
 
 void drawBookmarkStatusIcon(const GfxRenderer& renderer, const int x, const int y) {
   constexpr int bytesPerRow = bookmarkStatusIconWidth / 8;
@@ -414,6 +429,9 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
         batteryReserve + batteryPercentSpacing +
         ui.target.measureText(fui::GfxRendererTarget::FONT_SMALL, percentText, tokens.smallText).width);
   }
+  const bool bluetoothConnected = BleHid.isRunning() && BleHid.isConnected();
+  const int16_t bluetoothReserve = bluetoothConnected ? bluetoothStatusIconWidth + bluetoothStatusIconGap : 0;
+  const int16_t headerStatusReserve = static_cast<int16_t>(batteryReserve + bluetoothReserve);
 
   fui::HeaderProps props;
   props.title = title;
@@ -446,7 +464,7 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
     const int titleTop = static_cast<int>(band.height) - tokens.headerUnderline - tokens.spaceMd - titleLineHeight;
     props.titleOffsetY = static_cast<int16_t>(titleTop - (static_cast<int>(band.height) - titleLineHeight) / 2);
   } else {
-    const int16_t reserve = static_cast<int16_t>(batteryReserve + tokens.spaceMd);
+    const int16_t reserve = static_cast<int16_t>(headerStatusReserve + tokens.spaceMd);
     if (batteryLeft) {
       props.leftReserve = reserve;
     } else {
@@ -479,6 +497,13 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
                                        : static_cast<int16_t>(band.right() - batteryEdgeInset - batteryReserve);
   const int16_t batteryH = static_cast<int16_t>(metrics.batteryBarHeight);
   fui::batteryIndicator(ui.frame, fui::Rect{batteryX, band.y, batteryReserve, batteryH}, battery);
+
+  if (bluetoothConnected) {
+    const int bluetoothX = batteryLeft ? batteryX + batteryReserve + bluetoothStatusIconGap
+                                       : batteryX - bluetoothStatusIconGap - bluetoothStatusIconWidth;
+    const int bluetoothY = band.y + (batteryH - bluetoothStatusIconHeight) / 2;
+    drawBluetoothStatusIcon(renderer, bluetoothX, bluetoothY);
+  }
 
   if (manualRightLabel) {
     const fui::Size labelSize = ui.target.measureText(fui::GfxRendererTarget::FONT_SMALL, subtitle, tokens.smallText);
@@ -1011,6 +1036,17 @@ void BaseTheme::drawStatusBar(GfxRenderer& renderer, const float bookProgress, c
       }
       renderer.drawText(SMALL_FONT_ID, clockX, textY, timeBuf);
     }
+  }
+
+  // Draw connected-Bluetooth indicator after the left-side time/battery cluster.
+  // On readers with a clock this lands immediately after the time; on boards
+  // without one it follows the battery.
+  if (BleHid.isRunning() && BleHid.isConnected()) {
+    const int iconGap = leftClusterWidth > 0 ? bluetoothStatusIconGap : 0;
+    const int iconX = leftClusterX + leftClusterWidth + iconGap;
+    const int iconY = textY + std::max(0, (renderer.getLineHeight(SMALL_FONT_ID) - bluetoothStatusIconHeight) / 2);
+    drawBluetoothStatusIcon(renderer, iconX, iconY);
+    leftClusterWidth += iconGap + bluetoothStatusIconWidth;
   }
 
   // Draw Bookmark

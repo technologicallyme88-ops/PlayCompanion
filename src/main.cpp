@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <BoardConfig.h>
+#include <BleKeyboardHost.h>
 #include <Epub.h>
 #include <FontCacheManager.h>
 #include <FontDecompressor.h>
@@ -278,6 +279,9 @@ void enterDeepSleep(bool fromTimeout = false) {
     Storage.remove(SLEEP_FRAME_FILE);
   }
 
+  // r11.4: fully release BLE controller/host RAM before deep sleep. Bonds persist in NVS.
+  if (BleHid.isRunning()) BleHid.end();
+
   // Tear down WiFi so the modem power domain isn't held alive across deep sleep.
   // Wake from deep sleep is effectively a chip reset, so no state needs to survive.
   if (WiFi.getMode() != WIFI_MODE_NULL) {
@@ -444,6 +448,11 @@ void setup() {
   COMPANION_STATE.loadFromFile();
   UITheme::getInstance().reload();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
+  // r11.4 BLE HID host. Keep the controller heap free when the user has Bluetooth off.
+  // Bonded remotes reconnect automatically from the SDK bond list after begin().
+  if (SETTINGS.bluetoothEnabled && !BleHid.begin("playcompanion")) {
+    LOG_ERR("BLE", "BLE HID host failed to initialize");
+  }
   // Frontlight PWM up (no-op on boards without one). Brightness + warmth are always
   // restored from persisted settings. The on/off state defaults to OFF at wake/boot —
   // so the user isn't greeted by a surprise glow (or a silent battery drain) — unless
@@ -585,6 +594,111 @@ void setup() {
   allowSleepAt = millis() + 2000;
 }
 
+namespace {
+void injectBleKey(const freeink::KeyEvent& ev) {
+  using B = MappedInputManager::Button;
+  using K = freeink::SpecialKey;
+  switch (ev.special) {
+    case K::PageUp:
+      mappedInputManager.injectVirtualPress(B::PageBack);
+      mappedInputManager.injectVirtualPress(B::NavPrevious);
+      break;
+    case K::PageDown:
+      mappedInputManager.injectVirtualPress(B::PageForward);
+      mappedInputManager.injectVirtualPress(B::NavNext);
+      break;
+    case K::Left:
+      mappedInputManager.injectVirtualPress(B::Left);
+      mappedInputManager.injectVirtualPress(B::PageBack);
+      mappedInputManager.injectVirtualPress(B::NavPrevious);
+      break;
+    case K::Right:
+      mappedInputManager.injectVirtualPress(B::Right);
+      mappedInputManager.injectVirtualPress(B::PageForward);
+      mappedInputManager.injectVirtualPress(B::NavNext);
+      break;
+    case K::Up:
+      mappedInputManager.injectVirtualPress(B::Up);
+      mappedInputManager.injectVirtualPress(B::NavPrevious);
+      // On the touch-focused X4 Pro, BLE D-pad Up/Down should also be useful
+      // while the book itself has focus. Left/Right already page-turn; mirror
+      // that behavior vertically for compact gamepad remotes such as IINE.
+      if (BoardConfig::isX4Pro()) mappedInputManager.injectVirtualPress(B::PageBack);
+      break;
+    case K::Down:
+      mappedInputManager.injectVirtualPress(B::Down);
+      mappedInputManager.injectVirtualPress(B::NavNext);
+      if (BoardConfig::isX4Pro()) mappedInputManager.injectVirtualPress(B::PageForward);
+      break;
+    case K::Enter:
+      mappedInputManager.injectVirtualPress(B::Confirm);
+      break;
+    case K::Escape:
+    case K::Backspace:
+      mappedInputManager.injectVirtualPress(B::Back);
+      break;
+    default:
+      break;
+  }
+}
+
+constexpr unsigned long BLE_DISCONNECTED_IDLE_SUSPEND_MS = 60000UL;
+
+bool bleAutoSuspended = false;
+unsigned long bleDisconnectedSince = 0;
+
+void pollBleInput() {
+  mappedInputManager.beginVirtualInputFrame();
+  if (!BleHid.isRunning()) return;
+  BleHid.poll();
+  freeink::KeyEvent ev;
+  while (BleHid.popKey(ev)) injectBleKey(ev);
+}
+
+// r11.4 Stage 3: once Bluetooth has been enabled, keep normal auto-reconnect
+// behavior while a bonded remote is expected, but do not leave an idle radio
+// consuming heap/power forever when nothing is connected. A local reader input
+// wakes the BLE host again; opening the Bluetooth settings screen also resumes it.
+void serviceBlePower(const bool localInputActivity) {
+  if (!SETTINGS.bluetoothEnabled) {
+    bleAutoSuspended = false;
+    bleDisconnectedSince = 0;
+    return;
+  }
+
+  if (BleHid.isRunning()) {
+    if (BleHid.isConnected() || BleHid.isScanning()) {
+      bleDisconnectedSince = 0;
+      bleAutoSuspended = false;
+      return;
+    }
+
+    // BleKeyboardHost::poll() handles reconnect attempts from the bond list.
+    // Give it one full minute before reclaiming the controller/host heap.
+    if (bleDisconnectedSince == 0) bleDisconnectedSince = millis();
+    if (millis() - bleDisconnectedSince >= BLE_DISCONNECTED_IDLE_SUSPEND_MS) {
+      LOG_INF("BLE", "Idle disconnected BLE host suspended after %lu ms", BLE_DISCONNECTED_IDLE_SUSPEND_MS);
+      BleHid.end();
+      bleAutoSuspended = true;
+      bleDisconnectedSince = 0;
+    }
+    return;
+  }
+
+  // Only wake an automatically-suspended radio from local input while reading.
+  // Settings explicitly resumes BLE in BluetoothSettingsActivity::onEnter().
+  if (bleAutoSuspended && localInputActivity && activityManager.isReaderActivity()) {
+    LOG_INF("BLE", "Local reader input waking suspended BLE host");
+    if (BleHid.begin("playcompanion")) {
+      bleAutoSuspended = false;
+      bleDisconnectedSince = millis();
+    } else {
+      LOG_ERR("BLE", "Failed to resume suspended BLE host");
+    }
+  }
+}
+}
+
 void loop() {
   static unsigned long maxLoopDuration = 0;
   const unsigned long loopStartTime = millis();
@@ -592,6 +706,22 @@ void loop() {
 
   gpio.setSharedConfirmPowerShortPressEmitsPower(SETTINGS.shortPwrBtn == CrossPointSettings::SHORT_PWRBTN::SLEEP);
   gpio.update();
+  const bool localInputActivity = gpio.wasAnyPressed() || gpio.wasAnyReleased() || gpio.wasTouchActivity();
+  pollBleInput();
+  serviceBlePower(localInputActivity);
+
+  // Connection chrome (home header + reader status bar) must repaint when the
+  // link comes up or goes down; otherwise an e-ink screen can keep the old icon
+  // state indefinitely until some unrelated navigation forces a render.
+  static bool bleUiStateInitialized = false;
+  static bool bleUiWasConnected = false;
+  const bool bleUiConnected = BleHid.isRunning() && BleHid.isConnected();
+  if (!bleUiStateInitialized || bleUiConnected != bleUiWasConnected) {
+    bleUiStateInitialized = true;
+    bleUiWasConnected = bleUiConnected;
+    activityManager.requestUpdate();
+  }
+
   halTiltSensor.update(SETTINGS.tiltPageTurn, SETTINGS.orientation, activityManager.isReaderActivity());
 
   renderer.setFadingFix(SETTINGS.fadingFix);
@@ -609,7 +739,38 @@ void loop() {
     if (line.startsWith("CMD:")) {
       String cmd = line.substring(4);
       cmd.trim();
-      if (cmd == "SCREENSHOT") {
+      if (cmd == "BTSTATUS") {
+        logSerial.printf("BT: running=%d connected=%d scanning=%d paired=%u suspended=%d name=%s\n", BleHid.isRunning(),
+                         BleHid.isConnected(), BleHid.isScanning(), BleHid.pairedCount(), bleAutoSuspended,
+                         BleHid.connectedName());
+      } else if (cmd == "BTSCAN") {
+        if (!BleHid.isRunning()) {
+          if (BleHid.begin("playcompanion")) {
+            SETTINGS.bluetoothEnabled = 1;
+            SETTINGS.saveToFile();
+          }
+        }
+        BleHid.startScan(8000);
+        logSerial.println("BT: scan started (8s); send CMD:BTLIST after it finishes");
+      } else if (cmd == "BTLIST") {
+        for (uint8_t i = 0; i < BleHid.deviceCount(); ++i) {
+          const auto& d = BleHid.device(i);
+          logSerial.printf("BTDEV:%u,%s,%s,rssi=%d,hid=%d,connectable=%d\n", i, d.addr, d.name, d.rssi, d.hid,
+                           d.connectable);
+        }
+      } else if (cmd.startsWith("BTCONNECT:")) {
+        String addr = cmd.substring(10);
+        addr.trim();
+        logSerial.printf("BT: connect %s -> %d\n", addr.c_str(), BleHid.connect(addr.c_str()));
+      } else if (cmd.startsWith("BTFORGET:")) {
+        String addr = cmd.substring(9);
+        addr.trim();
+        BleHid.forget(addr.c_str());
+        logSerial.printf("BT: forgot %s\n", addr.c_str());
+      } else if (cmd == "BTDISCONNECT") {
+        BleHid.disconnect();
+        logSerial.println("BT: disconnected");
+      } else if (cmd == "SCREENSHOT") {
         const uint32_t bufferSize = display.getBufferSize();
         logSerial.printf("SCREENSHOT_START:%d\n", bufferSize);
         uint8_t* buf = display.getFrameBuffer();
@@ -621,7 +782,7 @@ void loop() {
 
   // Check for any user activity (button press or release) or active background work
   static unsigned long lastActivityTime = millis();
-  if (gpio.wasAnyPressed() || gpio.wasAnyReleased() || gpio.wasTouchActivity() || halTiltSensor.hadActivity() ||
+  if (localInputActivity || mappedInputManager.hadVirtualActivity() || halTiltSensor.hadActivity() ||
       activityManager.preventAutoSleep()) {
     lastActivityTime = millis();         // Reset inactivity timer
     powerManager.setPowerSaving(false);  // Restore normal CPU frequency on user activity

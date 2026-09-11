@@ -18,6 +18,7 @@ enum class SettingAction {
   KOReaderSync,
   OPDSBrowser,
   Network,
+  Bluetooth,
   ClearCache,
   CheckForUpdates,
   SdFirmwareUpdate,
@@ -28,6 +29,7 @@ enum class SettingAction {
 
 struct SettingInfo {
   StrId nameId;
+  const char* rawName = nullptr;  // Optional literal label for fork-local settings without new I18n keys.
   SettingType type;
   uint8_t CrossPointSettings::* valuePtr = nullptr;
   std::vector<StrId> enumValues;
@@ -92,6 +94,15 @@ struct SettingInfo {
   static SettingInfo Action(StrId nameId, SettingAction action) {
     SettingInfo s;
     s.nameId = nameId;
+    s.type = SettingType::ACTION;
+    s.action = action;
+    return s;
+  }
+
+  static SettingInfo ActionText(const char* label, SettingAction action) {
+    SettingInfo s;
+    s.nameId = StrId::STR_NONE_OPT;
+    s.rawName = label;
     s.type = SettingType::ACTION;
     s.action = action;
     return s;

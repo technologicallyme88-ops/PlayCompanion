@@ -276,6 +276,9 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t embeddedStyle = 1;
   // Focus Reading - emphasizes the first part of words with bold
   uint8_t focusReadingEnabled = 0;
+  // Bluetooth LE HID host preference. Off by default; bonds are stored by NimBLE in NVS.
+  uint8_t bluetoothEnabled = 0;
+
   // Reading companion: a small character whose mood tracks how much you read.
   // Off by default so nothing about the stock reader changes unless asked for.
   uint8_t companionEnabled = 0;

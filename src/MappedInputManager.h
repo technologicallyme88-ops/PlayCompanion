@@ -99,6 +99,12 @@ class MappedInputManager {
   bool wasLightPanelGesture() const;
   bool wasAnyPressed() const;
   bool wasAnyReleased() const;
+
+  // r11.4 BLE HID: virtual logical-button edges injected once per main-loop frame.
+  // This keeps Bluetooth remotes on the same input path as the physical controls.
+  void beginVirtualInputFrame();
+  void injectVirtualPress(Button button);
+  bool hadVirtualActivity() const { return virtualPressedMask != 0; }
   unsigned long getHeldTime() const;
   const GfxRenderer& getRenderer() const { return renderer; }
   Labels mapLabels(const char* back, const char* confirm, const char* previous, const char* next) const;
@@ -138,6 +144,10 @@ class MappedInputManager {
   bool wasPowerConfirmClick() const;
 #endif
   void rememberTouchHeldTime() const;
+
+  static constexpr uint32_t buttonBit(Button b) { return 1UL << static_cast<uint8_t>(b); }
+  bool virtualPressed(Button button) const { return (virtualPressedMask & buttonBit(button)) != 0; }
+  uint32_t virtualPressedMask = 0;
 
   mutable bool touchHeldOverrideValid = false;
   mutable unsigned long touchHeldOverrideMs = 0;

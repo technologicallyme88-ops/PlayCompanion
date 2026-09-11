@@ -377,6 +377,9 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
         SettingInfo::Toggle(StrId::STR_MOVE_FINISHED_TO_READ, &CrossPointSettings::moveFinishedToReadFolder,
                             "moveFinishedToReadFolder", StrId::STR_CAT_SYSTEM),
 
+        // Bluetooth preference: persisted/web-exposed but managed by the dedicated Bluetooth screen.
+        SettingInfo::Toggle(StrId::STR_NONE_OPT, &CrossPointSettings::bluetoothEnabled, "bluetoothEnabled"),
+
         // OPDS download folder: persisted + web-exposed, but category-less so it
         // is hidden from the on-device Settings screen (edited via OPDS UI).
         SettingInfo::String(StrId::STR_OPDS_DOWNLOAD_FOLDER, &SETTINGS.opdsDownloadFolder[0],

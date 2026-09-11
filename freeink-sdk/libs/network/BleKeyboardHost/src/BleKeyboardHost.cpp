@@ -120,6 +120,51 @@ uint8_t extractPrimaryCode(const uint8_t* p, size_t n, size_t* codeIdx = nullptr
   return 0;
 }
 
+// IINE Game Brick V2 profile (adapted from the public CrossPoint Enhanced
+// decoder). These remotes connect successfully as BLE HID, but their five-byte
+// reports are gamepad-shaped instead of keyboard-shaped:
+//   byte0: 0x13 active / 0x12 release tail
+//   byte1-2: 16-bit LE counter; freezes at 0x07D0 for vertical D-pad holds
+//   byte3: horizontal axis, centered around 0x98
+//   byte4: 0x07 / 0x09 vertical-or-action, 0x08 horizontal/idle
+// We translate the physical controls into normal keyboard usages so the existing
+// firmware input mapping works unchanged: D-pad -> arrows, A -> Enter, B -> Escape.
+bool containsIgnoreCase(const char* haystack, const char* needle) {
+  if (!haystack || !needle || !needle[0]) return false;
+  for (const char* h = haystack; *h; ++h) {
+    const char* a = h;
+    const char* b = needle;
+    while (*a && *b) {
+      char ca = *a;
+      char cb = *b;
+      if (ca >= 'A' && ca <= 'Z') ca = static_cast<char>(ca - 'A' + 'a');
+      if (cb >= 'A' && cb <= 'Z') cb = static_cast<char>(cb - 'A' + 'a');
+      if (ca != cb) break;
+      ++a;
+      ++b;
+    }
+    if (!*b) return true;
+  }
+  return false;
+}
+
+uint8_t g_iineLastEmittedUsage = 0;
+uint32_t g_iineLastEmitMs = 0;
+constexpr uint32_t kIineDebounceMs = 180;
+
+bool hasMacPrefixIgnoreCase(const char* addr, const char* prefix) {
+  if (!addr || !prefix) return false;
+  while (*prefix) {
+    if (!*addr) return false;
+    char a = *addr++;
+    char b = *prefix++;
+    if (a >= 'A' && a <= 'F') a = static_cast<char>(a - 'A' + 'a');
+    if (b >= 'A' && b <= 'F') b = static_cast<char>(b - 'A' + 'a');
+    if (a != b) return false;
+  }
+  return true;
+}
+
 #ifndef FREEINK_BLE_HID_SCAN_DEBUG
 #ifdef FREEINK_BLE_KEYBOARD_SCAN_DEBUG
 #define FREEINK_BLE_HID_SCAN_DEBUG FREEINK_BLE_KEYBOARD_SCAN_DEBUG
@@ -307,15 +352,13 @@ class ScanCB : public NimBLEScanCallbacks {
 class ClientCB : public NimBLEClientCallbacks {
   void onDisconnect(NimBLEClient*, int) override { self().onLinkDown(); }
   void onPassKeyEntry(NimBLEConnInfo& connInfo) override { NimBLEDevice::injectPassKey(connInfo, 123456); }
-  uint32_t onPassKeyDisplay(NimBLEConnInfo&) override {
-    const uint32_t passkey = NimBLEDevice::getSecurityPasskey();
+  // NimBLE-Arduino 2.3.8 does not provide a client-side onPassKeyDisplay
+  // callback. Numeric-comparison passkeys arrive through onConfirmPasskey.
+  void onConfirmPasskey(NimBLEConnInfo& connInfo, uint32_t passkey) override {
     self().onPairingPasskey(passkey);
 #if FREEINK_BLE_HID_SCAN_DEBUG
     Serial.printf("[BleHid] pairing passkey: %06lu\n", static_cast<unsigned long>(passkey));
 #endif
-    return passkey;
-  }
-  void onConfirmPasskey(NimBLEConnInfo& connInfo, uint32_t) override {
     NimBLEDevice::injectConfirmPasskey(connInfo, true);
   }
   // Reject peripheral connection-parameter updates — some keyboards request one
@@ -694,6 +737,123 @@ void BleKeyboardHost::onReportIngest(const uint8_t* data, size_t len) {
   }
 #endif
 
+  // IINE/Game Brick reports are five-byte gamepad frames rather than keyboard
+  // reports. Name/MAC matching is useful, but some retail firmware advertises
+  // under a generic HID name or a different address prefix. Auto-detect the
+  // unmistakable stable report shape too: 0x12/0x13 status + b4 0x07/0x08/0x09.
+  // A report-id-prefixed characteristic can make that frame start at byte 1, so
+  // check both offsets. This keeps ordinary keyboards/page turners on the generic
+  // path while allowing the user's IINE unit to work even when its advertisement
+  // does not match the known profile strings.
+  size_t iineOffset = SIZE_MAX;
+  if (len >= 5) {
+    const size_t maxOffset = len >= 6 ? 1 : 0;
+    for (size_t off = 0; off <= maxOffset; ++off) {
+      const uint8_t status = data[off];
+      const uint8_t button = data[off + 4];
+      const bool statusLooksIine = (status & 0xFE) == 0x12;
+      const bool buttonLooksIine = button == 0x07 || button == 0x08 || button == 0x09;
+      if (statusLooksIine && (iineGameBrick_ || buttonLooksIine)) {
+        iineOffset = off;
+        break;
+      }
+    }
+  }
+
+  if (!iineGameBrick_ && iineOffset != SIZE_MAX) {
+    iineGameBrick_ = true;
+    iineLastCounter_ = 0;
+    iineLatchedVertical_ = 0;
+    iineCenterFrames_ = 0;
+    iineActiveUsage_ = 0;
+  g_iineLastEmittedUsage = 0;
+  g_iineLastEmitMs = 0;
+#if FREEINK_BLE_HID_SCAN_DEBUG
+    Serial.println("[BleHid] profile: auto-detected IINE/Game Brick report");
+#endif
+  }
+
+  if (iineGameBrick_ && len >= 5) {
+    // The user's IINE controller exposes two little-endian 16-bit axes:
+    //   axis1 = bytes 1-2, axis2 = bytes 3-4
+    // byte0 bit0 is the physical press state: 0x13 while held, 0x12 on release.
+    //
+    // Captured release endpoints:
+    //   UP    2000, 3600
+    //   DOWN  2000,  900
+    //   LEFT  4060, 2000
+    //   RIGHT    0,  600
+    //   A     3000, 2000
+    //   B     3000, 2500
+    //
+    // Intermediate held reports ramp through values that overlap other controls.
+    // Therefore classify ONLY the final 0x12 release report. This deliberately
+    // trades a few milliseconds of release latency for deterministic one-action-
+    // per-click behavior and prevents B's release from becoming a second Back.
+    if (iineOffset == SIZE_MAX) return;
+    const uint8_t* report = data + iineOffset;
+    const bool activeFrame = (report[0] & 0x01) != 0;
+
+    uint16_t axis1 = 0;
+    uint16_t axis2 = 0;
+    memcpy(&axis1, report + 1, sizeof(axis1));
+    memcpy(&axis2, report + 3, sizeof(axis2));
+
+    if (activeFrame) {
+      // Never emit from a ramping/held frame.
+      return;
+    }
+
+    uint8_t usage = 0;
+
+    // A/B occupy a distinct x ~= 3000 band. Test this first so they can never
+    // be mistaken for LEFT while the horizontal axis is above center.
+    if (axis1 >= 2700 && axis1 <= 3300) {
+      if (axis2 >= 1700 && axis2 <= 2250) {
+        usage = 0x28;  // A -> Enter
+      } else if (axis2 > 2250 && axis2 <= 2800) {
+        usage = 0x29;  // B -> Escape
+      }
+    }
+
+    // D-pad release endpoints. Wide thresholds tolerate unit-to-unit ADC drift
+    // while remaining well separated from A/B and the ~2000 neutral center.
+    if (usage == 0) {
+      if (axis1 <= 700) {
+        usage = 0x4F;  // physical RIGHT -> HID Right
+      } else if (axis1 >= 3500) {
+        usage = 0x50;  // physical LEFT -> HID Left
+      } else if (axis2 <= 1200) {
+        usage = 0x51;  // physical DOWN -> HID Down
+      } else if (axis2 >= 3300) {
+        usage = 0x52;  // physical UP -> HID Up
+      }
+    }
+
+#if FREEINK_BLE_HID_REPORT_DEBUG
+    Serial.printf("[IINE DECODE] release axis1=%u axis2=%u usage=0x%02X\n",
+                  (unsigned)axis1, (unsigned)axis2, usage);
+#endif
+
+    if (usage != 0) {
+      const uint32_t now = millis();
+      const bool duplicate =
+          usage == g_iineLastEmittedUsage && (now - g_iineLastEmitMs) < kIineDebounceMs;
+      if (!duplicate) {
+        g_iineLastEmittedUsage = usage;
+        g_iineLastEmitMs = now;
+        emitUsage(usage, 0);
+      }
+    }
+
+    // Clear legacy latch state so reconnects / later presses start cleanly.
+    iineActiveUsage_ = 0;
+    iineLatchedVertical_ = 0;
+    iineCenterFrames_ = 0;
+    heldUsage_ = 0;
+    return;
+  }
+
   // Normalize: strip a leading report id (len 9). Boot/report-protocol keyboard
   // reports are [mod][reserved][k0..k5] (8 bytes) or a compact [mod][k0..k5] (7).
   const uint8_t* p = data;
@@ -891,6 +1051,19 @@ void BleKeyboardHost::onScanResultIngest(const char* addr, const char* name, int
 }
 
 void BleKeyboardHost::onLinkUp(const char* addr, const char* name, uint8_t type) {
+  // Enable the dedicated IINE/Game Brick report decoder by known V2 MAC prefix
+  // or advertised product name. This is intentionally connection-local.
+  iineGameBrick_ = hasMacPrefixIgnoreCase(addr, "60:4d:ec") || containsIgnoreCase(name, "IINE") ||
+                   (containsIgnoreCase(name, "Game") && containsIgnoreCase(name, "Brick"));
+  iineLastCounter_ = 0;
+  iineLatchedVertical_ = 0;
+  iineCenterFrames_ = 0;
+  iineActiveUsage_ = 0;
+#if FREEINK_BLE_HID_SCAN_DEBUG
+  if (iineGameBrick_) {
+    Serial.printf("[BleHid] profile: IINE Game Brick (%s / %s)\n", addr ? addr : "", name ? name : "");
+  }
+#endif
   // Resolve a friendly name from the scan or bond lists if the caller has none.
   const char* resolved = (name && name[0] && (!addr || strcmp(name, addr) != 0)) ? name : nullptr;
   if (!resolved && addr) {
@@ -954,6 +1127,13 @@ void BleKeyboardHost::onLinkUp(const char* addr, const char* name, uint8_t type)
 }
 
 void BleKeyboardHost::onLinkDown() {
+  iineGameBrick_ = false;
+  iineLastCounter_ = 0;
+  iineLatchedVertical_ = 0;
+  iineCenterFrames_ = 0;
+  iineActiveUsage_ = 0;
+  g_iineLastEmittedUsage = 0;
+  g_iineLastEmitMs = 0;
   connected_ = false;
   connecting_ = false;
   portENTER_CRITICAL(&g_mux);

@@ -179,6 +179,17 @@ class BleKeyboardHost {
   volatile uint32_t heldSince_ = 0;
   volatile uint32_t lastRepeat_ = 0;
   uint8_t prevKeys_[6] = {0};  // backend-task only
+
+  // IINE Game Brick profile state. The Game Brick connects as BLE HID but its
+  // reports are gamepad-shaped rather than keyboard-shaped, so the generic HID
+  // usage translator cannot identify its D-pad/A/B buttons. When the connected
+  // address/name identifies an IINE/Game Brick, onReportIngest() decodes its
+  // five-byte report into standard HID usages before enqueueing KeyEvents.
+  bool iineGameBrick_ = false;
+  uint16_t iineLastCounter_ = 0;
+  uint8_t iineLatchedVertical_ = 0;
+  uint8_t iineCenterFrames_ = 0;
+  uint8_t iineActiveUsage_ = 0;
 };
 
 }  // namespace freeink
