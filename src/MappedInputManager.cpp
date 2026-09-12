@@ -276,7 +276,13 @@ bool MappedInputManager::wasTopEdgeDownSwipe() const { return wasEdgeSwipe(fui::
 
 bool MappedInputManager::wasBottomEdgeUpSwipe() const { return wasEdgeSwipe(fui::ScreenEdge::Bottom); }
 
-bool MappedInputManager::wasMenuGesture() const { return wasTopEdgeDownSwipe(); }
+bool MappedInputManager::wasMenuGesture() const {
+  // X4 Pro: restore the original reader gesture layout. The capacitive Home key
+  // already owns Home, so the bottom-edge upward swipe is free for the reader
+  // menu while the top-edge downward swipe remains dedicated to frontlight.
+  if (BoardConfig::isX4Pro()) return wasBottomEdgeUpSwipe();
+  return wasTopEdgeDownSwipe();
+}
 
 bool MappedInputManager::wasHomeGesture() const {
   return gpio.hasHomeKey() ? gpio.wasHomeKeyTapped() : wasBottomEdgeUpSwipe();

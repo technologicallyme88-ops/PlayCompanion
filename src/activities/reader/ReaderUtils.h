@@ -1,5 +1,6 @@
 #pragma once
 
+#include <BoardConfig.h>
 #include <CrossPointSettings.h>
 #include <GfxRenderer.h>
 #include <HalGPIO.h>
@@ -100,10 +101,32 @@ inline TouchPageTurn detectTouchPageTurn(GfxRenderer& renderer, const MappedInpu
 
   const int16_t width = static_cast<int16_t>(renderer.getScreenWidth());
   const int16_t height = static_cast<int16_t>(renderer.getScreenHeight());
-  // Outer thirds only: the center column contains the reader-menu tap target
-  // (isTouchMenuTap below), so it must not double as a page turn.
-  const int16_t zoneWidth = width / 3;
   const bool inverted = SETTINGS.touchReaderControls == CrossPointSettings::TOUCH_READER_INVERTED_TAP;
+
+  // X4 Pro: use the reading surface as a simple 20/80 split. The left 20% is
+  // Previous and the right 80% is Next (reversed by the existing inverted-tap
+  // setting). The reader menu is reached by the restored bottom-edge swipe, so
+  // no center tap hole is needed on this device.
+  if (BoardConfig::isX4Pro()) {
+    const int16_t prevWidth = static_cast<int16_t>(width / 5);
+    const freeink::ui::TapZone zones[] = {
+        {freeink::ui::Rect{0, 0, prevWidth, height}, inverted ? READER_TOUCH_NEXT : READER_TOUCH_PREV},
+        {freeink::ui::Rect{prevWidth, 0, static_cast<int16_t>(width - prevWidth), height},
+         inverted ? READER_TOUCH_PREV : READER_TOUCH_NEXT},
+    };
+    for (const auto& zone : zones) {
+      if (!zone.enabled || !zone.rect.contains(static_cast<int16_t>(x), static_cast<int16_t>(y))) continue;
+      result.prev = zone.action == READER_TOUCH_PREV;
+      result.next = zone.action == READER_TOUCH_NEXT;
+      break;
+    }
+    result.heldMs = gpio.lastTouchHeldMs();
+    return result;
+  }
+
+  // Other touch boards retain the existing outer-third page zones, leaving the
+  // center third available for the reader-menu tap target.
+  const int16_t zoneWidth = width / 3;
   const freeink::ui::TapZone zones[] = {
       {freeink::ui::Rect{0, 0, zoneWidth, height}, inverted ? READER_TOUCH_NEXT : READER_TOUCH_PREV},
       {freeink::ui::Rect{static_cast<int16_t>(width - zoneWidth), 0, zoneWidth, height},
@@ -146,7 +169,11 @@ inline bool isTouchMenuTap(const GfxRenderer& renderer, const MappedInputManager
 // reachable via the Confirm button.
 inline bool isTouchMenuGesture(const GfxRenderer& renderer, const MappedInputManager& input) {
   if (!SETTINGS.touchReaderControls) return false;
-  return (input.hasTouch() && input.wasMenuGesture()) || isTouchMenuTap(renderer, input);
+  if (!input.hasTouch()) return false;
+  // X4 Pro reserves the full reading surface for the 20/80 page-turn split;
+  // its reader menu is the restored bottom-edge upward swipe.
+  if (BoardConfig::isX4Pro()) return input.wasMenuGesture();
+  return input.wasMenuGesture() || isTouchMenuTap(renderer, input);
 }
 
 // One helper, blocking or deferred: the async form starts the refresh and
