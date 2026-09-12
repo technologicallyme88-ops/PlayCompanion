@@ -5,8 +5,9 @@
 #include "util/ButtonNavigator.h"
 
 // Top-anchored frontlight overlay opened by a top-edge down-swipe. It drives
-// brightness and warmth live, and includes only a sun on/off control; Night
-// Mode deliberately lives in the reader menu instead.
+// brightness and warmth live. On X4 Pro it also restores the compact moon
+// toggle beside the sun so Night Mode can be changed from the same swipe-down
+// panel; other boards keep their existing panel behavior.
 class FrontlightPanelActivity final : public Activity, private UiAppHost {
   ButtonNavigator buttonNavigator;
 
@@ -22,6 +23,7 @@ class FrontlightPanelActivity final : public Activity, private UiAppHost {
   // touched-by-the-user flag: onExit() must not persist a mirror that never
   // reflected user intent in the first place.
   bool lightOnChanged = false;
+  bool nightMode = false;
   bool draggingSlider = false;
   int panelBottom = 0;
 
@@ -29,6 +31,7 @@ class FrontlightPanelActivity final : public Activity, private UiAppHost {
   static void onBrightnessEvent(const freeink::ui::ActionEvent& event, void* user);
   static void onWarmthEvent(const freeink::ui::ActionEvent& event, void* user);
   static void onToggleEvent(const freeink::ui::ActionEvent& event, void* user);
+  static void onNightModeEvent(const freeink::ui::ActionEvent& event, void* user);
   static void onBrightnessStepEvent(const freeink::ui::ActionEvent& event, void* user);
   static void onWarmthStepEvent(const freeink::ui::ActionEvent& event, void* user);
 
@@ -39,6 +42,7 @@ class FrontlightPanelActivity final : public Activity, private UiAppHost {
   void adjustBrightness(int delta);
   void adjustWarmth(int delta);
   void toggleLight();
+  void toggleNightMode();
   void close();
 
  public:

@@ -1,5 +1,6 @@
 #include "FrontlightPanelActivity.h"
 
+#include <BoardConfig.h>
 #include <FreeInkUIIcon.h>
 #include <GfxRenderer.h>
 #include <HalFrontlight.h>
@@ -20,6 +21,7 @@ namespace {
 constexpr fui::ActionId ACTION_BRIGHTNESS = 1;
 constexpr fui::ActionId ACTION_WARMTH = 2;
 constexpr fui::ActionId ACTION_TOGGLE = 3;
+constexpr fui::ActionId ACTION_NIGHT_MODE = 6;
 constexpr fui::ActionId ACTION_BRIGHTNESS_STEP = 4;
 constexpr fui::ActionId ACTION_WARMTH_STEP = 5;
 constexpr int BUTTON_BRIGHTNESS_STEP = 5;
@@ -43,11 +45,13 @@ void FrontlightPanelActivity::onEnter() {
   warmth = Frontlight.warmth();
   lightOn = Frontlight.isOn();
   lightOnChanged = false;
+  nightMode = SETTINGS.screenInverted != 0;
 
   resetUi();
   app.on(ACTION_BRIGHTNESS, &FrontlightPanelActivity::onBrightnessEvent, this);
   app.on(ACTION_WARMTH, &FrontlightPanelActivity::onWarmthEvent, this);
   app.on(ACTION_TOGGLE, &FrontlightPanelActivity::onToggleEvent, this);
+  app.on(ACTION_NIGHT_MODE, &FrontlightPanelActivity::onNightModeEvent, this);
   app.on(ACTION_BRIGHTNESS_STEP, &FrontlightPanelActivity::onBrightnessStepEvent, this);
   app.on(ACTION_WARMTH_STEP, &FrontlightPanelActivity::onWarmthStepEvent, this);
   app.setScreen(&FrontlightPanelActivity::panelScreen, this);
@@ -94,6 +98,10 @@ void FrontlightPanelActivity::onToggleEvent(const fui::ActionEvent&, void* user)
   static_cast<FrontlightPanelActivity*>(user)->toggleLight();
 }
 
+void FrontlightPanelActivity::onNightModeEvent(const fui::ActionEvent&, void* user) {
+  static_cast<FrontlightPanelActivity*>(user)->toggleNightMode();
+}
+
 void FrontlightPanelActivity::onBrightnessStepEvent(const fui::ActionEvent& event, void* user) {
   static_cast<FrontlightPanelActivity*>(user)->adjustBrightness(event.value * FINE_STEP);
 }
@@ -131,6 +139,14 @@ void FrontlightPanelActivity::toggleLight() {
   lightOn = !lightOn;
   lightOnChanged = true;
   Frontlight.setOn(lightOn);
+  requestUpdate();
+}
+
+void FrontlightPanelActivity::toggleNightMode() {
+  if (!BoardConfig::isX4Pro()) return;
+  nightMode = !nightMode;
+  SETTINGS.screenInverted = nightMode ? 1 : 0;
+  SETTINGS.saveToFile();
   requestUpdate();
 }
 
@@ -213,12 +229,26 @@ void FrontlightPanelActivity::buildPanelScreen(UiScreen& screen) {
   const int16_t iconWidth = static_cast<int16_t>(sunIcon.width);
   const int16_t iconHeight = static_cast<int16_t>(sunIcon.height);
   const int16_t controlWidth = static_cast<int16_t>(iconWidth + theme.spaceLg * 2);
+  const bool showNightToggle = BoardConfig::isX4Pro();
+  const int16_t totalControlsWidth = static_cast<int16_t>(controlWidth * (showNightToggle ? 2 : 1));
   const fui::Rect sunHit{static_cast<int16_t>(headerRow.right() - controlWidth), headerRow.y, controlWidth, rowHeight};
   const fui::Rect sunRect{static_cast<int16_t>(sunHit.x + (controlWidth - iconWidth) / 2),
                           static_cast<int16_t>(headerRow.y + (rowHeight - iconHeight) / 2), iconWidth, iconHeight};
   const fui::Rect labelRect{headerRow.x, static_cast<int16_t>(headerRow.y + (rowHeight - lineHeight) / 2),
-                            static_cast<int16_t>(headerRow.width - controlWidth - theme.spaceMd), lineHeight};
+                            static_cast<int16_t>(headerRow.width - totalControlsWidth - theme.spaceMd), lineHeight};
   screen.target().text(labelRect, line, theme.bodyText);
+
+  if (showNightToggle) {
+    const fui::BitmapRef moonIcon = fui::bitmapFromIcon(nightMode ? icon_moon_filled_32 : icon_moon_32);
+    const int16_t moonWidth = static_cast<int16_t>(moonIcon.width);
+    const int16_t moonHeight = static_cast<int16_t>(moonIcon.height);
+    const fui::Rect moonHit{static_cast<int16_t>(sunHit.x - controlWidth), headerRow.y, controlWidth, rowHeight};
+    const fui::Rect moonRect{static_cast<int16_t>(moonHit.x + (controlWidth - moonWidth) / 2),
+                             static_cast<int16_t>(headerRow.y + (rowHeight - moonHeight) / 2), moonWidth, moonHeight};
+    screen.frame().hit(moonHit, ACTION_NIGHT_MODE);
+    screen.target().bitmap(moonRect, moonIcon, fui::BitmapMode::Center);
+  }
+
   screen.frame().hit(sunHit, ACTION_TOGGLE);
   screen.target().bitmap(sunRect, sunIcon, fui::BitmapMode::Center);
 
