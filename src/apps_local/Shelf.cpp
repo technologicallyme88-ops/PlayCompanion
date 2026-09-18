@@ -12,6 +12,7 @@
 #include "ShelfFolderActivity.h"
 #include "connections/ConnectionsActivity.h"
 #include "dungeon/DungeonActivity.h"
+#include "dungeonrun/DungeonRunActivity.h"
 #include "knucklebones/KnucklebonesActivity.h"
 #include "minesweeper/MinesweeperActivity.h"
 #include "murdle/MurdleActivity.h"
@@ -30,6 +31,7 @@ constexpr shelf::Item kGames[] = {
     {"MINESWEEPER", &icon_minesweeper_32, &MinesweeperActivity::create},
     {"SOLITAIRE", &icon_solitaire_32, &SolitaireActivity::create},
     {"D&DIAGRAMS", &icon_dungeon_32, &DungeonActivity::create},
+    {"DUNGEON RUN", &icon_dungeon_32, &DungeonRunActivity::create},
     {"CONNECTIONS", &icon_connections_32, &ConnectionsActivity::create},
 };
 
