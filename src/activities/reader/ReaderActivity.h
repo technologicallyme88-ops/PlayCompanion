@@ -28,6 +28,7 @@ class ReaderActivity : public Activity {
   virtual bool handleFormatInput() { return false; }
   virtual bool pageTurn(bool isForward) = 0;
   bool pageTurnTracked(bool isForward);
+  bool skipPagesTracked(int amount);
   virtual bool skipPages(int amount) { return pageTurn(amount > 0); }
   virtual bool isAtEndOfBook() const = 0;
   virtual void onReturnFromEndOfBook() {}

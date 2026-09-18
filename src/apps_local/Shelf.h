@@ -95,6 +95,10 @@ void openFolder(int index, GfxRenderer& renderer, MappedInputManager& mappedInpu
 // so leave() can undo it.
 void openItem(int folder, int item, GfxRenderer& renderer, MappedInputManager& mappedInput);
 
+// Launch a shelf item directly from Home. Back returns to Home rather than to
+// the item's folder, because the folder was never entered.
+void openItemFromHome(int folder, int item, GfxRenderer& renderer, MappedInputManager& mappedInput);
+
 // Open PLAYER, the one screen in the fork that is not a game and not a folder.
 //
 // It is reached from the footer bar rather than from a row, so it is not an

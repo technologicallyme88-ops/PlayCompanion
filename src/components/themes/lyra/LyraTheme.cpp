@@ -72,6 +72,8 @@ const uint8_t* iconForName(UIIcon icon, int size) {
         return ShelfGamesIcon;
       case UIIcon::Apps:
         return ShelfAppsIcon;
+      case UIIcon::Pokemon:
+        return ShelfPokemonIcon;
       case UIIcon::Transfer:
         return TransferIcon;
       case UIIcon::Library:
@@ -522,7 +524,7 @@ HomeCompanionLayout LyraTheme::getHomeCompanionLayout(const GfxRenderer& rendere
   int widestLabel = 0;
   for (int i = 0; i < buttonCount; ++i) {
     const std::string label = buttonLabel(i);
-    widestLabel = std::max(widestLabel, renderer.getTextWidth(UI_12_FONT_ID, label.c_str()));
+    widestLabel = std::max(widestLabel, renderer.getTextWidth(UI_10_FONT_ID, label.c_str()));
   }
   // Mirrors drawButtonMenu's run: 16px inset, icon, gap, label, then the inset again.
   const int tileWidth = 16 + mainMenuIconSize + hPaddingInSelection + 2 + widestLabel + 16;
@@ -550,6 +552,10 @@ HomeCompanionLayout LyraTheme::getHomeCompanionLayout(const GfxRenderer& rendere
 void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                                const std::function<std::string(int index)>& buttonLabel,
                                const std::function<UIIcon(int index)>& rowIcon) const {
+  // A narrowed button menu is Home's split layout beside the companion. Use
+  // the smaller UI face there so long labels do not consume the companion
+  // column; full-width button menus retain their established size.
+  const int labelFont = rect.width < renderer.getScreenWidth() ? UI_10_FONT_ID : UI_12_FONT_ID;
   for (int i = 0; i < buttonCount; ++i) {
     int tileWidth = rect.width - LyraMetrics::values.contentSidePadding * 2;
     Rect tileRect = Rect{rect.x + LyraMetrics::values.contentSidePadding,
@@ -565,7 +571,7 @@ void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
     std::string labelStr = buttonLabel(i);
     const char* label = labelStr.c_str();
     int textX = tileRect.x + 16;
-    const int lineHeight = renderer.getLineHeight(UI_12_FONT_ID);
+    const int lineHeight = renderer.getLineHeight(labelFont);
     const int textY = tileRect.y + (LyraMetrics::values.menuRowHeight - lineHeight) / 2;
 
     if (rowIcon != nullptr) {
@@ -577,6 +583,6 @@ void LyraTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount
       }
     }
 
-    renderer.drawText(UI_12_FONT_ID, textX, textY, label, true);
+    renderer.drawText(labelFont, textX, textY, label, true);
   }
 }

@@ -46,8 +46,8 @@ constexpr shelf::Item kApps[] = {
 // nothing else: the Home hook counts this table rather than knowing its length.
 constexpr shelf::Folder kFolders[] = {
     {"Games", UIIcon::Games, &icon_games_32, kGames, static_cast<int>(sizeof(kGames) / sizeof(shelf::Item)), true},
-};
     {"Apps", UIIcon::Apps, &icon_apps_32, kApps, static_cast<int>(sizeof(kApps) / sizeof(shelf::Item)), false},
+};
 
 constexpr int kFolderCount = static_cast<int>(sizeof(kFolders) / sizeof(kFolders[0]));
 
@@ -230,6 +230,15 @@ void openItem(const int folder, const int item, GfxRenderer& renderer, MappedInp
   if (!replaceWith(parent.items[item].create(renderer, mappedInput), parent.items[item].title)) {
     openFolderIndex = -1;
   }
+}
+
+void openItemFromHome(const int folder, const int item, GfxRenderer& renderer, MappedInputManager& mappedInput) {
+  if (folder < 0 || folder >= kFolderCount || item < 0 || item >= kFolders[folder].count) {
+    LOG_ERR("SHELF", "Bad direct item %d/%d", folder, item);
+    return;
+  }
+  openFolderIndex = -1;
+  replaceWith(kFolders[folder].items[item].create(renderer, mappedInput), kFolders[folder].items[item].title);
 }
 
 void autostartFromEnv(GfxRenderer& renderer, MappedInputManager& mappedInput) {

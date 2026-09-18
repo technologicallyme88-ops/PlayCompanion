@@ -3,10 +3,46 @@
 #include <I18n.h>
 #include <Logging.h>
 
+#if defined(CROSSINK_ENABLE_POKEMON)
+#include "components/pokemon/PokemonArt.h"
+#include "pokemon/PokemonService.h"
+#include "pokemon/PokemonCompanionArt.h"
+#endif
+
 #include <algorithm>
 
 namespace companion {
 namespace {
+
+#if defined(CROSSINK_ENABLE_POKEMON)
+// Stage 3C: the single dynamic Pokemon companion uses the existing 40x30
+// species BMPs already installed at /.crosspoint/pokemon/sprites/001.bmp...
+// The image is fitted into the normal 34x30 companion footprint so all of the
+// existing Home layouts, walking lane, bobbing, labels, and speech bubbles stay
+// intact. If SD art is unavailable, rendering falls through to the Stage 3B
+// generic Pokemon pose instead of leaving a blank companion.
+bool drawPartyLeadPokemon(const GfxRenderer& renderer, const CompanionId id, const Mood mood, const int x, const int y,
+                          const int scale) {
+  if (id != CompanionId::Pokemon || scale < 1) return false;
+
+  pokemon::PokemonDashboardSnapshot snapshot{};
+  if (pokemon::devicePokemonService().loadDashboardSnapshot(snapshot) != pokemon::ServiceStatus::Ok) return false;
+  if (snapshot.leader.recordId == 0 || snapshot.leader.speciesId == 0) return false;
+  // Stage 3C.3: give Pokemon a larger Home presentation. The hero asset is
+  // already the detailed 120x90 source; a 160x120 destination gives it much
+  // more presence than the normal companion footprint without crowding the
+  // speech bubble/status block.
+  const Rect bounds{x, y, 160, 120};
+  /* Stage 3D.2A MOOD SPRITE */
+  if (pokemon::drawPokemonCompanionMoodArt(renderer, snapshot.leader.speciesId, mood, bounds)) {
+    return true;
+  }
+
+  // If the SD mood sprite is absent, keep the Stage 3C behavior and use the
+  // normal 120x90 species hero instead of leaving a blank companion.
+  return pokemon::drawPokemonSpeciesArt(renderer, snapshot.leader.speciesId, true, bounds, false);
+}
+#endif
 
 // Radius is at most 12, so a plain search beats pulling in <cmath> for sqrt.
 int isqrt(const int value) {
@@ -107,6 +143,9 @@ int poseInkHeight(const CompanionId id, const Mood mood, const int scale) {
 void drawPoseTrimmed(const GfxRenderer& renderer, const CompanionId id, const Mood mood, const int x, const int y,
                      const int scale, const bool mirrored) {
   if (scale < 1) return;
+#if defined(CROSSINK_ENABLE_POKEMON)
+  if (drawPartyLeadPokemon(renderer, id, mood, x, y, scale)) return;
+#endif
   const auto companionIndex = static_cast<uint8_t>(id);
   const auto moodIndex = static_cast<uint8_t>(mood);
   if (companionIndex >= COMPANION_COUNT || moodIndex >= MOOD_COUNT) return;
@@ -144,6 +183,9 @@ void drawPoseTrimmed(const GfxRenderer& renderer, const CompanionId id, const Mo
 void drawPose(const GfxRenderer& renderer, const CompanionId id, const Mood mood, const int x, const int y,
               const int scale, const bool mirrored) {
   if (scale < 1) return;
+#if defined(CROSSINK_ENABLE_POKEMON)
+  if (drawPartyLeadPokemon(renderer, id, mood, x, y, scale)) return;
+#endif
 
   const auto companionIndex = static_cast<uint8_t>(id);
   const auto moodIndex = static_cast<uint8_t>(mood);

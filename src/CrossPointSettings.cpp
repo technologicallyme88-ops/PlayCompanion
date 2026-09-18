@@ -12,6 +12,9 @@
 #include "I18nKeys.h"
 #include "ReaderFontSizes.h"
 #include "SettingsList.h"
+#if defined(CROSSINK_ENABLE_POKEMON)
+#include "companion/CompanionSprites.generated.h"
+#endif
 #include "fontIds.h"
 
 namespace {
@@ -87,6 +90,16 @@ void CrossPointSettings::toJson(JsonDocument& doc) const {
   doc["frontButtonConfirm"] = frontButtonConfirm;
   doc["frontButtonLeft"] = frontButtonLeft;
   doc["frontButtonRight"] = frontButtonRight;
+#if defined(CROSSINK_ENABLE_POKEMON)
+  /* Stage 3C.3 POKEMON FLAG SAVE */
+  doc["pokemonCompanionSelected"] = pokemonCompanionSelected;
+  // Keep the numeric key too for compatibility and for normal companions.
+  doc["companionId"] = companionId;
+#endif
+#if defined(CROSSINK_ENABLE_POKEMON)
+  /* Stage 3C.2 PERSIST SAVE */
+  doc["companionId"] = companionId;
+#endif
   // Font family and size — both use dynamic getter/setters in SettingsList (the
   // option lists depend on the SD font registry), so the generic loop skips them.
   doc["fontFamily"] = fontFamily;
@@ -193,8 +206,19 @@ bool CrossPointSettings::fromJson(JsonVariantConst doc) {
   frontButtonRight =
       clamp(doc["frontButtonRight"] | (uint8_t)FRONT_HW_RIGHT, FRONT_BUTTON_HARDWARE_COUNT, FRONT_HW_RIGHT);
   validateFrontButtonMapping(s);
-
-  // Reader font size — an actual point size since 1.5. Files written by 1.4 and
+#if defined(CROSSINK_ENABLE_POKEMON)
+  /* Stage 3C.3 POKEMON FLAG RESTORE */
+  pokemonCompanionSelected = doc["pokemonCompanionSelected"] | static_cast<uint8_t>(0);
+  if (pokemonCompanionSelected != 0) {
+    companionId = static_cast<uint8_t>(companion::CompanionId::Pokemon);
+  } else if (!doc["companionId"].isNull()) {
+    const uint8_t savedCompanion = doc["companionId"].as<uint8_t>();
+    companionId = savedCompanion < companion::COMPANION_COUNT
+                      ? savedCompanion
+                      : static_cast<uint8_t>(3);
+  }
+#endif
+// Reader font size — an actual point size since 1.5. Files written by 1.4 and
   // earlier hold the old SMALL/MEDIUM/LARGE/EXTRA_LARGE slot in 0..3; no font is
   // renderable at those sizes, so the range is unambiguous and folds to the
   // point sizes those slots used to mean. Drop this once 1.4 upgrades are done.

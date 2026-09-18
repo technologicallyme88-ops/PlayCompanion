@@ -1,5 +1,8 @@
 #include "CompanionTracker.h"
 
+#if defined(CROSSINK_ENABLE_POKEMON)
+#include "pokemon/PokemonCompanionBridge.h"
+#endif
 #include <Arduino.h>
 #include <HalClock.h>
 #include <Logging.h>
@@ -24,6 +27,15 @@ int32_t signedUtcOffsetQuarterHours() {
 bool CompanionTracker::isEnabled() { return SETTINGS.companionEnabled != 0; }
 
 companion::CompanionId CompanionTracker::activeId() {
+#if defined(CROSSINK_ENABLE_POKEMON)
+  // Stage 3C.4: the durable NVS bit is authoritative across hard power cycles.
+  // Synchronize companionId in RAM after boot so Settings also shows Pokemon.
+  if (pokemon::persistentPokemonCompanionSelected()) {
+    SETTINGS.companionId = static_cast<uint8_t>(companion::CompanionId::Pokemon);
+    return companion::CompanionId::Pokemon;
+  }
+#endif
+
   const uint8_t id = SETTINGS.companionId;
   if (id >= companion::COMPANION_COUNT) return static_cast<companion::CompanionId>(3);
   return static_cast<companion::CompanionId>(id);
@@ -50,6 +62,8 @@ void CompanionTracker::beginSession() {
   accumulator.reset();
   pagesThisSession = 0;
   bankedSeconds = 0;
+  sessionStartedS = millis() / 1000;
+  verifiedOpeningSeconds = 0;
   sessionActive = true;
   refreshDay();
 }
@@ -63,7 +77,19 @@ void CompanionTracker::refreshForDisplay() {
 
 void CompanionTracker::onPageTurn() {
   if (!isEnabled() || !sessionActive) return;
-  accumulator.onPageTurn(millis() / 1000);
+
+  const uint32_t nowS = millis() / 1000;
+
+  // The first successful navigation proves that this was a real reading
+  // session. Recover up to the same five-minute active window from the time
+  // spent on the opening page, so slow first-page reading is not discarded.
+  if (pagesThisSession == 0 && accumulator.creditedSeconds() == 0) {
+    constexpr uint32_t OPENING_PAGE_CAP_S = 300;
+    const uint32_t openingPageS = nowS - sessionStartedS;
+    verifiedOpeningSeconds = openingPageS > OPENING_PAGE_CAP_S ? OPENING_PAGE_CAP_S : openingPageS;
+  }
+
+  accumulator.onPageTurn(nowS);
   pagesThisSession++;
 }
 
@@ -80,10 +106,12 @@ void CompanionTracker::tick() {
 
 bool CompanionTracker::bankSession() {
   const uint32_t unbanked = accumulator.creditedSeconds() - bankedSeconds;
-  if (unbanked == 0 && pagesThisSession == 0) return false;
+  const uint32_t opening = verifiedOpeningSeconds;
+  if (unbanked == 0 && opening == 0 && pagesThisSession == 0) return false;
 
-  const bool changed = COMPANION_STATE.recordSession(unbanked, pagesThisSession, clockValid, localDay);
+  const bool changed = COMPANION_STATE.recordSession(unbanked + opening, pagesThisSession, clockValid, localDay);
   bankedSeconds = accumulator.creditedSeconds();
+  verifiedOpeningSeconds = 0;
   pagesThisSession = 0;
   return changed;
 }
@@ -111,8 +139,10 @@ companion::MoodInput CompanionTracker::buildMoodInput() const {
     // unbanked remainder: the mood should react during a long first session,
     // not only after it crosses a checkpoint. The clockless branch already
     // reports the whole session, so adding it there would double-count.
-    const uint32_t unbanked = (accumulator.creditedSeconds() - bankedSeconds) / 60;
-    const uint32_t total = in.creditedMinutesToday + unbanked;
+    const uint32_t unbanked =
+        (accumulator.creditedSeconds() - bankedSeconds + verifiedOpeningSeconds) / 60;
+    const uint32_t base = (COMPANION_STATE.ledger.counterDay == localDay) ? in.creditedMinutesToday : 0;
+    const uint32_t total = base + unbanked;
     in.creditedMinutesToday = total > UINT16_MAX ? UINT16_MAX : static_cast<uint16_t>(total);
   }
   return in;

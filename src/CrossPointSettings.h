@@ -285,6 +285,11 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Index into companion::COMPANION_SPRITES (0 = the first companion).
   // Persisted numerically, so sprites/order.txt is append-only.
   uint8_t companionId = 3;
+#if defined(CROSSINK_ENABLE_POKEMON)
+  // Stable persistence bit for the dynamic Party-lead Pokemon option. Kept
+  // separately from companionId because that enum is rebuilt dynamically.
+  uint8_t pokemonCompanionSelected = 0;
+#endif
   // Draw the companion on the home screen (0 = off, 1 = on).
   uint8_t companionOnHome = 1;
   // SD card font family name (empty = use built-in fontFamily)

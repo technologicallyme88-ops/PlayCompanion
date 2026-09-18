@@ -16,6 +16,9 @@
 #include "XtcReaderActivity.h"
 #include "companion/CompanionTracker.h"
 #include "apps_local/journal/ReadingJournal.h"
+#if defined(CROSSINK_ENABLE_POKEMON)
+#include "pokemon/PokemonService.h"
+#endif
 
 ReaderActivity::ReaderActivity(const char* name, GfxRenderer& renderer, MappedInputManager& mappedInput,
                                std::string bookPath, const bool allowFastInitialRefresh)
@@ -67,6 +70,12 @@ void ReaderActivity::onEnter() {
     return;
   }
 
+#if defined(CROSSINK_ENABLE_POKEMON)
+  // Start Pokemon reading progression only after the book opened successfully.
+  // The service is a no-op until a starter/save exists.
+  pokemon::devicePokemonService().beginReadingSession();
+#endif
+
   APP_STATE.openEpubPath = bookPath;
   APP_STATE.saveToFile();
   RECENT_BOOKS.addBook(bookPath, getBookTitle(), getBookAuthor(), getBookThumbBmpPath());
@@ -80,6 +89,9 @@ void ReaderActivity::onExit() {
   Activity::onExit();
 
   COMPANION.endSession();
+#if defined(CROSSINK_ENABLE_POKEMON)
+  pokemon::devicePokemonService().flushOnExit(static_cast<uint32_t>(millis()));
+#endif
 
   renderer.setOrientation(GfxRenderer::Orientation::Portrait);
   APP_STATE.readerActivityLoadCount = 0;
@@ -91,6 +103,14 @@ void ReaderActivity::onExit() {
 
 bool ReaderActivity::pageTurnTracked(const bool isForward) {
   const bool turned = pageTurn(isForward);
+  if (turned) COMPANION.onPageTurn();
+  return turned;
+}
+
+bool ReaderActivity::skipPagesTracked(const int amount) {
+  const bool turned = skipPages(amount);
+  // A successful fast navigation is evidence that the reader is active, but it
+  // counts as one navigation event rather than pretending ten pages were read.
   if (turned) COMPANION.onPageTurn();
   return turned;
 }
@@ -170,13 +190,13 @@ void ReaderActivity::loop() {
 
   if (prevTriggered) {
     if (skip) {
-      skipPages(-10);
+      skipPagesTracked(-10);
     } else {
       pageTurnTracked(false);
     }
   } else {
     if (skip) {
-      skipPages(10);
+      skipPagesTracked(10);
     } else {
       pageTurnTracked(true);
     }

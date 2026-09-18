@@ -37,6 +37,10 @@
 #include "SdCardFontSystem.h"
 #include "activities/settings/TextSettingsActivity.h"
 #include "components/UITheme.h"
+#include "companion/CompanionTracker.h"
+#if defined(CROSSINK_ENABLE_POKEMON)
+#include "pokemon/PokemonService.h"
+#endif
 #include "fontIds.h"
 #include "util/BookmarkUtil.h"
 #include "util/ScreenshotUtil.h"
@@ -58,6 +62,21 @@ int clampPercent(int percent) {
 }
 
 constexpr char READ_FOLDER[] = "/read";
+
+#if defined(CROSSINK_ENABLE_POKEMON)
+uint8_t pokemonBookProgressPercent(const std::shared_ptr<Epub>& epub, const int spineIndex, const Section* section) {
+  if (!epub || epub->getBookSize() == 0) return 0;
+  const int spineCount = epub->getSpineItemsCount();
+  if (spineCount <= 0) return 0;
+  if (spineIndex >= spineCount) return 100;
+  const float chapterProgress =
+      section && section->estimatedTotalPages() > 1
+          ? static_cast<float>(section->currentPage) / static_cast<float>(section->estimatedTotalPages() - 1)
+          : 0.0f;
+  const float progress = epub->calculateProgress(std::max(0, spineIndex), std::clamp(chapterProgress, 0.0f, 1.0f));
+  return static_cast<uint8_t>(clampPercent(static_cast<int>(progress * 100.0f + 0.5f)));
+}
+#endif
 
 bool isInReadFolder(const std::string& path) {
   constexpr size_t n = sizeof(READ_FOLDER) - 1;
@@ -141,6 +160,69 @@ void moveFinishedBookToReadFolder(const std::string& srcPath, const std::string&
 }
 
 }  // namespace
+
+
+#if defined(CROSSINK_ENABLE_POKEMON)
+namespace {
+bool pokemonEncounterPendingNow() {
+  pokemon::PokemonDashboardSnapshot snapshot{};
+  return pokemon::devicePokemonService().loadDashboardSnapshot(snapshot) == pokemon::ServiceStatus::Ok &&
+         snapshot.pending.kind != pokemon::PendingEventKind::None;
+}
+
+void drawReaderEncounterBadge(const GfxRenderer& renderer, const CrossPointSettings::StatusBarSpec& sb,
+                              const float bookProgress, const int currentPage, const int pageCount) {
+  constexpr int BOX = 15;
+  constexpr int GAP = 5;
+
+  const auto& theme = UITheme::getInstance();
+  const auto& metrics = theme.getMetrics();
+  const int screenW = renderer.getScreenWidth();
+  const int screenH = renderer.getScreenHeight();
+  const int statusH = theme.getStatusBarHeight();
+  if (statusH <= 0) return;
+
+  // Estimate the trailing status cluster (battery / battery percent / book
+  // percentage), then place the badge immediately to the left of the chapter
+  // page-count lane. This keeps the Bluetooth rune and all left-side status
+  // content untouched.
+  // Stage 3D.2B DYNAMIC READER BADGE
+  // Measure the exact right-side text for this page instead of reserving a
+  // fixed "999/999" width. This keeps the same visual gap for 9/205,
+  // 34/205, 134/205, etc.
+  char progressText[48]{};
+  if (sb.showChapterPageCount && sb.showBookProgressPercent) {
+    const int roundedProgress = static_cast<int>(bookProgress + 0.5f);
+    snprintf(progressText, sizeof(progressText), "%d/%d %d%%",
+             currentPage, pageCount, roundedProgress);
+  } else if (sb.showChapterPageCount) {
+    snprintf(progressText, sizeof(progressText), "%d/%d", currentPage, pageCount);
+  }
+
+  const int progressWidth = renderer.getTextWidth(SMALL_FONT_ID, progressText);
+  int x = screenW - metrics.contentSidePadding - progressWidth - GAP - BOX;
+  x = std::max(metrics.contentSidePadding, x);
+
+  // User's reader status bar is configured at the bottom. Center the badge in
+  // that band; this also keeps it clear of a thin progress rule.
+  int y = screenH - statusH + std::max(0, (statusH - BOX) / 2) - 7;  // Pokemon badge: align with status text
+
+  // Pixel octagon, same visual language as the Home encounter indicator.
+  renderer.drawLine(x + 3, y, x + BOX - 4, y, true);
+  renderer.drawLine(x + 3, y + BOX - 1, x + BOX - 4, y + BOX - 1, true);
+  renderer.drawLine(x, y + 3, x, y + BOX - 4, true);
+  renderer.drawLine(x + BOX - 1, y + 3, x + BOX - 1, y + BOX - 4, true);
+  renderer.drawLine(x + 1, y + 2, x + 3, y, true);
+  renderer.drawLine(x + BOX - 4, y, x + BOX - 2, y + 2, true);
+  renderer.drawLine(x + 1, y + BOX - 3, x + 3, y + BOX - 1, true);
+  renderer.drawLine(x + BOX - 4, y + BOX - 1, x + BOX - 2, y + BOX - 3, true);
+
+  const int cx = x + BOX / 2;
+  renderer.fillRect(cx - 1, y + 3, 3, 6, true);
+  renderer.fillRect(cx - 1, y + 11, 3, 3, true);
+}
+}  // namespace
+#endif
 
 EpubReaderActivity::~EpubReaderActivity() {
   ImageBlock::setExtractor(nullptr, nullptr);
@@ -298,6 +380,32 @@ void EpubReaderActivity::loop() {
     return;
   }
 
+#if defined(CROSSINK_ENABLE_POKEMON)
+  // Consume only turns whose destination page completed a render, then let the
+  // five-minute tracker checkpoint earned whole minutes without blocking input.
+  pokemon::VerifiedTurn pokemonTurn{};
+  if (pokemonTurnVerifier.consume(pokemonTurn)) {
+    auto& service = pokemon::devicePokemonService();
+    service.setBookProgressPercent(pokemonTurn.bookProgressPercent);
+    service.onSuccessfulPageTurn(pokemonTurn.renderedAtMs);
+  }
+  const uint32_t pokemonNowMs = static_cast<uint32_t>(millis());
+  pokemon::devicePokemonService().checkpointIfDue(pokemonNowMs);
+
+  // Poll the persisted event queue at a low rate instead of touching the SD on
+  // every render/page turn. Encounter generation itself is checkpoint-driven,
+  // so at most ~30 seconds of notification latency is expected.
+  if (lastPokemonEncounterPollMs == 0 ||
+      static_cast<uint32_t>(pokemonNowMs - lastPokemonEncounterPollMs) >= 30000UL) {
+    lastPokemonEncounterPollMs = pokemonNowMs;
+    const bool pending = pokemonEncounterPendingNow();
+    if (pending != pokemonEncounterPending) {
+      pokemonEncounterPending = pending;
+      requestUpdate();
+    }
+  }
+#endif
+
   constexpr unsigned long IDLE_PREWARM_DEBOUNCE_MS = 400;
   if (section && !section->isBuilding() && !RenderLock::peek() && renderer.hasFrameBuffer() &&
       lastRenderCompleteMs != 0 && millis() - lastRenderCompleteMs > IDLE_PREWARM_DEBOUNCE_MS &&
@@ -392,7 +500,7 @@ void EpubReaderActivity::loop() {
     }
 
     if ((millis() - lastPageTurnTime) >= pageTurnDuration) {
-      pageTurn(true);
+      pageTurnTracked(true);
       requestUpdate();
       return;
     }
@@ -519,7 +627,10 @@ void EpubReaderActivity::loop() {
     }
     const bool forward = pendingManualTurn > 0;
     pendingManualTurn = 0;
-    pageTurn(forward);
+    const bool turned = pageTurnTracked(forward);
+#if defined(CROSSINK_ENABLE_POKEMON)
+    if (turned) pokemonTurnVerifier.request(pokemonBookProgressPercent(epub, currentSpineIndex, section.get()));
+#endif
     requestUpdate();
     return;
   }
@@ -544,7 +655,7 @@ void EpubReaderActivity::loop() {
   }
 
   if (longPress && SETTINGS.longPressButtonBehavior == SETTINGS.CHAPTER_SKIP) {
-    skipPages(nextTriggered ? 1 : -1);
+    skipPagesTracked(nextTriggered ? 1 : -1);
     requestUpdate();
     return;
   }
@@ -568,11 +679,15 @@ void EpubReaderActivity::loop() {
     return;
   }
 
+  bool turned = false;
   if (prevTriggered) {
-    pageTurn(false);
+    turned = pageTurnTracked(false);
   } else {
-    pageTurn(true);
+    turned = pageTurnTracked(true);
   }
+#if defined(CROSSINK_ENABLE_POKEMON)
+  if (turned) pokemonTurnVerifier.request(pokemonBookProgressPercent(epub, currentSpineIndex, section.get()));
+#endif
   requestUpdate();
 }
 
@@ -1275,6 +1390,9 @@ void EpubReaderActivity::renderBook() {
     renderContents(std::move(p), orientedMarginTop, orientedMarginRight, orientedMarginBottom, orientedMarginLeft);
     LOG_DBG("ERS", "Rendered page in %dms", millis() - start);
     lastRenderCompleteMs = millis();
+#if defined(CROSSINK_ENABLE_POKEMON)
+    pokemonTurnVerifier.renderSucceeded(static_cast<uint32_t>(lastRenderCompleteMs));
+#endif
   }
 
   if (currentSpineIndex != lastSavedSpineIndex || section->currentPage != lastSavedPage ||
@@ -1304,11 +1422,11 @@ void EpubReaderActivity::renderBook() {
 
 void EpubReaderActivity::onEndOfBookRendered() {
   automaticPageTurnActive = false;
-  if (pendingSyncSaveError) {
   if (!journalFinishRecorded && epub) {
     journalFinishRecorded = journal::noteFinished(epub->getPath().c_str());
     if (!journalFinishRecorded) LOG_ERR("ERS", "Could not record journal finish");
   }
+  if (pendingSyncSaveError) {
     pendingSyncSaveError = false;
     GUI.drawPopup(renderer, tr(STR_SAVE_PROGRESS_FAILED));
   }
@@ -1613,6 +1731,11 @@ void EpubReaderActivity::renderStatusBar() const {
 
   GUI.drawStatusBar(renderer, bookProgress, currentPage, pageCount, title, 0, textYOffset, true, currentPageBookmarked,
                     section ? section->isBuilding() : false);
+#if defined(CROSSINK_ENABLE_POKEMON)
+  if (pokemonEncounterPending && sb.showChapterPageCount) {
+    drawReaderEncounterBadge(renderer, sb, bookProgress, currentPage, pageCount);
+  }
+#endif
 }
 
 void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool savePosition) {

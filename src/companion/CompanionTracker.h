@@ -73,6 +73,8 @@ class CompanionTracker {
   companion::SessionAccumulator accumulator;
   uint32_t pagesThisSession = 0;
   uint32_t bankedSeconds = 0;  // already folded into CompanionState this session
+  uint32_t sessionStartedS = 0;  // used to recover bounded first-page reading time
+  uint32_t verifiedOpeningSeconds = 0;
   int32_t localDay = 0;
   bool clockValid = false;
   bool sessionActive = false;

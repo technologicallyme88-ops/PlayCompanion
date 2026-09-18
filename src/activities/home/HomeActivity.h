@@ -80,10 +80,14 @@ class HomeActivity final : public Activity {
   void drawCompanionColumn(Rect region, const char* label, const char* sub, const char* quote) const;
   void onSelectBook(const std::string& path);
   void onFileBrowserOpen();
-  void onRecentsOpen();
+  void onJournalOpen();
   void onSettingsOpen();
   void onFileTransferOpen();
   void onOpdsBrowserOpen();
+#if defined(CROSSINK_ENABLE_POKEMON)
+  bool pokemonEncounterPending = false;
+  void onPokemonOpen();
+#endif
 
   int getMenuItemCount() const;
   int upstreamMenuRows() const;  // stock home rows before CrossPlay shelf folders

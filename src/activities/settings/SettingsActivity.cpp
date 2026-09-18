@@ -12,7 +12,14 @@
 #include "ButtonRemapActivity.h"
 #include "BluetoothSettingsActivity.h"
 #include "ClearCacheActivity.h"
-#include "CrossPointSettings.h"
+#include "CrossPointSettings.h"
+#if defined(CROSSINK_ENABLE_POKEMON)
+#include "pokemon/PokemonCompanionBridge.h"
+#include "companion/CompanionSprites.generated.h"
+#endif
+#if defined(CROSSINK_ENABLE_POKEMON)
+#include "companion/CompanionSprites.generated.h"
+#endif
 #include "FontDownloadActivity.h"
 #include "KOReaderSettingsActivity.h"
 #include "LanguageSelectActivity.h"
@@ -281,6 +288,20 @@ void SettingsActivity::toggleCurrentSetting() {
       const auto valuePtr = setting.valuePtr;
       auto onSelect = [this, valuePtr, sleepScreenChanged, quickResumeTimeoutChanged](int idx) {
         SETTINGS.*valuePtr = idx;
+#if defined(CROSSINK_ENABLE_POKEMON)
+        /* Stage 3C.4 NVS COMPANION SELECT */
+        if (valuePtr == &CrossPointSettings::companionId) {
+          pokemon::setPokemonCompanionSelectedPersistent(
+              idx == static_cast<int>(companion::CompanionId::Pokemon));
+        }
+#endif
+#if defined(CROSSINK_ENABLE_POKEMON)
+        /* Stage 3C.3 POKEMON FLAG SELECT */
+        if (valuePtr == &CrossPointSettings::companionId) {
+          SETTINGS.pokemonCompanionSelected =
+              idx == static_cast<int>(companion::CompanionId::Pokemon) ? 1 : 0;
+        }
+#endif
         syncQuickResumeTimeoutForSleepScreen(sleepScreenChanged, quickResumeTimeoutChanged);
         SETTINGS.saveToFile();
         rebuildSettingsLists();

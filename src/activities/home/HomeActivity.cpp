@@ -6,6 +6,13 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
+#if defined(CROSSINK_ENABLE_POKEMON)
+#include <Memory.h>
+#include "activities/pokemon/PokemonActivity.h"
+#include "pokemon/PokemonCompanionBridge.h"
+#include "pokemon/PokemonCompanionDialogue.h"
+#include "pokemon/PokemonService.h"
+#endif
 #include <Utf8.h>
 #include <Xtc.h>
 #include <esp_random.h>
@@ -31,6 +38,58 @@
 namespace {
 // One-shot: set by the boot path, consumed by the first home paint.
 bool panelHoldsRetainedFrame = false;
+
+int homeShelfFolderCount() { return std::min(1, shelf::folderCount()); }
+
+bool pokemonEncounterPendingNow() {
+#if defined(CROSSINK_ENABLE_POKEMON)
+  pokemon::PokemonDashboardSnapshot snapshot{};
+  return pokemon::devicePokemonService().loadDashboardSnapshot(snapshot) == pokemon::ServiceStatus::Ok &&
+         snapshot.pending.kind == pokemon::PendingEventKind::Encounter;
+#else
+  return false;
+#endif
+}
+
+void drawPokemonEncounterIndicator(const GfxRenderer& renderer, const Rect& headerBand) {
+#if defined(CROSSINK_ENABLE_POKEMON)
+  const auto& metrics = UITheme::getInstance().getMetrics();
+
+  // Reserve enough room for the worst-case battery label ("100%") and glyph.
+  // The indicator sits immediately outside that status cluster, so it remains
+  // visually tied to the battery without depending on a specific theme.
+  constexpr int BOX = 18;
+  constexpr int GAP = 6;
+  constexpr int BATTERY_NUB = 2;
+  constexpr int PERCENT_GAP = 6;
+  const int percentReserve =
+      SETTINGS.hideBatteryPercentage == CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS
+          ? 0
+          : PERCENT_GAP + renderer.getTextWidth(SMALL_FONT_ID, "100%");
+  const int batteryReserve = metrics.batteryWidth + BATTERY_NUB + percentReserve;
+
+  const bool batteryLeft = metrics.headerBatterySide == 1;
+  const int edgeInset = metrics.headerBatteryDetached ? 12 : metrics.contentSidePadding;
+  int x = batteryLeft ? headerBand.x + edgeInset + batteryReserve + GAP
+                      : headerBand.x + headerBand.width - edgeInset - batteryReserve - GAP - BOX;
+  const int y = headerBand.y + std::max(0, (static_cast<int>(metrics.batteryBarHeight) - BOX) / 2);
+
+  // Pixel-art octagonal badge matching the supplied reference: clipped corners,
+  // black outline, white center, and a blocky exclamation point.
+  renderer.drawLine(x + 3, y, x + BOX - 4, y, true);
+  renderer.drawLine(x + 3, y + BOX - 1, x + BOX - 4, y + BOX - 1, true);
+  renderer.drawLine(x, y + 3, x, y + BOX - 4, true);
+  renderer.drawLine(x + BOX - 1, y + 3, x + BOX - 1, y + BOX - 4, true);
+  renderer.drawLine(x + 1, y + 2, x + 3, y, true);
+  renderer.drawLine(x + BOX - 4, y, x + BOX - 2, y + 2, true);
+  renderer.drawLine(x + 1, y + BOX - 3, x + 3, y + BOX - 1, true);
+  renderer.drawLine(x + BOX - 4, y + BOX - 1, x + BOX - 2, y + BOX - 3, true);
+
+  const int cx = x + BOX / 2;
+  renderer.fillRect(cx - 1, y + 4, 3, 7, true);
+  renderer.fillRect(cx - 1, y + 13, 3, 3, true);
+#endif
+}
 
 // Companion dialogue must never use GfxRenderer::wrappedText() with a hard
 // line limit: that helper intentionally ellipsises the final line.  Companion
@@ -104,13 +163,15 @@ void drawCompanionPager(const GfxRenderer& renderer, const Rect& bubble, const i
 void HomeActivity::notePanelHoldsRetainedFrame() { panelHoldsRetainedFrame = true; }
 
 int HomeActivity::upstreamMenuRows() const {
-  const auto& metrics = UITheme::getInstance().getMetrics();
-  const bool continueRow = metrics.homeContinueReadingInMenu && !recentBooks.empty();
-  return 4 + (hasOpdsServers ? 1 : 0) + (continueRow ? 1 : 0);
+  // Callers use menu indices after the recent-book selection has been removed.
+  return 4 + (hasOpdsServers ? 1 : 0);
 }
 
 int HomeActivity::getMenuItemCount() const {
-  int count = 4 + shelf::folderCount();  // stock rows + CrossPlay Games/Apps folders
+  int count = 4 + homeShelfFolderCount();  // stock rows + the CrossPlay Games folder
+#if defined(CROSSINK_ENABLE_POKEMON)
+  count++;  // Pokémon follows the game folders in button navigation.
+#endif
   if (!recentBooks.empty()) {
     count += recentBooks.size();
   }
@@ -205,6 +266,9 @@ void HomeActivity::onEnter() {
   // mood has to reflect days elapsed since the last reading session, and this
   // is the only screen that shows it outside one.
   COMPANION.refreshForDisplay();
+#if defined(CROSSINK_ENABLE_POKEMON)
+  pokemonEncounterPending = pokemonEncounterPendingNow();
+#endif
   companionMessagePage = 0;
   companionMessagePages = 1;
   // Pick the line once per visit, not per render, so it stays put while the
@@ -213,7 +277,14 @@ void HomeActivity::onEnter() {
   // reads as a bug even when it is chance. Not persisted: an SD write is not
   // worth it for flavour text, and a reshuffle after a reboot is harmless.
   static uint32_t lastQuote = UINT32_MAX;
-  const uint8_t quoteCount = companion::quoteCountFor(CompanionTracker::activeId(), COMPANION.currentMood());
+  uint8_t quoteCount = companion::quoteCountFor(CompanionTracker::activeId(), COMPANION.currentMood());
+#if defined(CROSSINK_ENABLE_POKEMON)
+  /* Stage 3D.1 DYNAMIC QUOTE COUNT */
+  if (pokemon::isPokemonCompanionSelected()) {
+    const uint8_t pokemonCount = pokemon::pokemonCompanionQuoteCount(COMPANION.currentMood());
+    if (pokemonCount > 0) quoteCount = pokemonCount;
+  }
+#endif
   if (quoteCount > 1) {
     uint32_t pick = lastQuote;
     while (pick == lastQuote) pick = esp_random() % quoteCount;
@@ -321,20 +392,45 @@ void HomeActivity::drawCompanion(const Rect region) const {
   const auto id = CompanionTracker::activeId();
   const auto mood = COMPANION.currentMood();
   const char* label = companion::moodLabel(mood);
+  std::string pokemonLeadName;
   char sub[40] = "";
+
+#if defined(CROSSINK_ENABLE_POKEMON)
+  // STAGE 3B: dynamic party-lead Pokemon companion
+  // Make a leader change visible immediately on Home even though Stage 3B uses
+  // one generic Poke Ball pose. Stage 3C swaps the art itself per species.
+  if (pokemon::isPokemonCompanionSelected()) {
+    pokemonLeadName = pokemon::pokemonCompanionDisplayName();
+    if (!pokemonLeadName.empty()) {
+      label = pokemonLeadName.c_str();
+      snprintf(sub, sizeof(sub), "%s", companion::moodLabel(mood));
+    }
+  }
+#endif
+
   const uint16_t minutes = COMPANION.minutesToday();
   const companion::MoodThresholds thresholds;
-  if (minutes >= thresholds.contentMinutes && minutes < thresholds.thrivingMinutes) {
+  if (sub[0] == '\0' && minutes >= thresholds.contentMinutes && minutes < thresholds.thrivingMinutes) {
     snprintf(sub, sizeof(sub), tr(STR_COMPANION_TO_THRIVING_FORMAT), thresholds.thrivingMinutes - minutes);
-  } else if (COMPANION.hasValidClock() && COMPANION_STATE.ledger.streakDays > 0) {
+  } else if (sub[0] == '\0' && COMPANION.hasValidClock() && COMPANION_STATE.ledger.streakDays > 0) {
     snprintf(sub, sizeof(sub), tr(STR_COMPANION_STREAK_FORMAT), COMPANION_STATE.ledger.streakDays);
   }
 
   // A beaten personal best takes over the bubble once, then reverts to the
   // normal mood lines. The flag is cleared by the caller after the render so a
   // repaint mid-visit does not swallow it before it has been seen.
-  const char* quote = COMPANION_STATE.milestonePending ? companion::milestoneQuoteFor(id, companionQuoteIndex)
-                                                       : companion::quoteFor(id, mood, companionQuoteIndex);
+  const char* quote = nullptr;
+  if (COMPANION_STATE.milestonePending) {
+    quote = companion::milestoneQuoteFor(id, companionQuoteIndex);
+  } else {
+#if defined(CROSSINK_ENABLE_POKEMON)
+    /* Stage 3D.1 SPECIES QUOTE */
+    if (pokemon::isPokemonCompanionSelected()) {
+      quote = pokemon::pokemonCompanionQuote(mood, companionQuoteIndex);
+    }
+#endif
+    if (!quote) quote = companion::quoteFor(id, mood, companionQuoteIndex);
+  }
 
   // Side by side only works if the widest character this could pick still leaves
   // a bubble wide enough to wrap. A column beside the menu does not, so it
@@ -608,7 +704,7 @@ void HomeActivity::loop() {
         onFileBrowserOpen();
         break;
       case HomeMenuItem::RECENTS:
-        onRecentsOpen();
+        onJournalOpen();
         break;
       case HomeMenuItem::OPDS_BROWSER:
         onOpdsBrowserOpen();
@@ -621,9 +717,18 @@ void HomeActivity::loop() {
         break;
       default: {
         const int shelfRow = menuIndex - upstreamMenuRows();
-        if (shelfRow >= 0 && shelfRow < shelf::folderCount()) {
+        if (shelfRow >= 0 && shelfRow < homeShelfFolderCount()) {
           shelf::openFolder(shelfRow, renderer, mappedInput);
+          break;
         }
+#if defined(CROSSINK_ENABLE_POKEMON)
+        // Pokémon is the companion-side tile paired with the final Games row.
+        // Keep it after the CrossPlay folders in navigation order so restoring
+        // the Games selection continues to use the unchanged shelf index.
+        if (menuIndex == upstreamMenuRows() + homeShelfFolderCount()) {
+          onPokemonOpen();
+        }
+#endif
         break;
       }
     }
@@ -736,6 +841,31 @@ void HomeActivity::loop() {
     return;
   }
 
+#if defined(CROSSINK_ENABLE_POKEMON)
+  // Pokémon occupies the companion-side half of the final shelf row. Games and
+  // Apps remain ordinary folders in the left menu on both touch and button hardware.
+  if (homeShelfFolderCount() > 0) {
+    const int stockRenderedRows =
+        upstreamMenuRows() + (metrics.homeContinueReadingInMenu && !recentBooks.empty() ? 1 : 0);
+    const int pokemonRenderedRow = stockRenderedRows + homeShelfFolderCount() - 1;
+    const int pokemonLeft = std::max(0, companionMenuWidth - 8);
+    const int pokemonRight = renderer.getScreenWidth();
+    const int tileY = menuTop + pokemonRenderedRow * (menuRowHeight + metrics.menuSpacing);
+    int touchRow = -1;
+    const auto touch = mappedInput.rowTouch(touchRow, tileY, menuRowHeight + metrics.menuSpacing, 1, pokemonLeft,
+                                            pokemonRight, menuRowHeight);
+    if (touch != MappedInputManager::RowTouch::None) {
+      const int menuIndex = upstreamMenuRows() + homeShelfFolderCount();
+      selectorIndex = static_cast<int>(recentBooks.size()) + menuIndex;
+      if (touch == MappedInputManager::RowTouch::Down)
+        requestUpdate();
+      else
+        onPokemonOpen();
+      return;
+    }
+  }
+#endif
+
   if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
     activateSelection();
   }
@@ -755,6 +885,13 @@ void HomeActivity::render(RenderLock&&) {
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.homeTopPadding - metrics.topPadding},
                  metrics.homeContinueReadingInMenu && !recentBooks.empty() ? recentBooks[0].title.c_str() : nullptr);
 
+#if defined(CROSSINK_ENABLE_POKEMON)
+  if (pokemonEncounterPending) {
+    drawPokemonEncounterIndicator(
+        renderer, Rect{0, metrics.topPadding, pageWidth, metrics.homeTopPadding - metrics.topPadding});
+  }
+#endif
+
   // Record the tile rect so storeCoverBuffer (called from the theme) knows
   // which sub-region of the framebuffer to snapshot. ~16 KB in Portrait
   // instead of the 48 KB full framebuffer the previous bind captured.
@@ -763,7 +900,7 @@ void HomeActivity::render(RenderLock&&) {
   coverRectH = metrics.homeCoverTileHeight;
 
   // Build menu items dynamically
-  std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES), tr(STR_MENU_RECENT_BOOKS), tr(STR_FILE_TRANSFER),
+  std::vector<const char*> menuItems = {tr(STR_BROWSE_FILES), tr(STR_READING_JOURNAL), tr(STR_FILE_TRANSFER),
                                         tr(STR_SETTINGS_TITLE)};
   std::vector<UIIcon> menuIcons = {Folder, Recent, Transfer, Settings};
 
@@ -778,9 +915,37 @@ void HomeActivity::render(RenderLock&&) {
     menuIcons.insert(menuIcons.begin(), Book);
   }
 
+#if defined(CROSSINK_ENABLE_POKEMON)
+  // Keep the Pokémon entry beside Games on every device. This leaves the
+  // companion column clear above it on button-only X3/X4 hardware, matching
+  // the existing X4 Pro home arrangement.
+  constexpr bool buttonPokemonMenu = false;
+#else
+  constexpr bool buttonPokemonMenu = false;
+#endif
+  // Reserve the small existing vectors once for the game folders and Pokemon.
+  menuItems.reserve(menuItems.size() + homeShelfFolderCount() + 1);
+  menuIcons.reserve(menuIcons.size() + homeShelfFolderCount() + 1);
+  const auto appendFolderRows = [&menuItems, &menuIcons](const int count) {
+    for (int i = 0; i < count; ++i) {
+      menuItems.push_back(shelf::folders()[i].title);
+      menuIcons.push_back(shelf::folders()[i].icon);
+    }
+  };
+  appendFolderRows(homeShelfFolderCount());
+#if defined(CROSSINK_ENABLE_POKEMON)
+  if (buttonPokemonMenu) {
+    menuItems.push_back(tr(STR_POKEMON));
+    menuIcons.push_back(Pokemon);
+  }
+#endif
+
   Rect menuRect{0, metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.homeMenuTopOffset, pageWidth,
                 pageHeight - (metrics.headerHeight + metrics.homeTopPadding + metrics.verticalSpacing +
                               metrics.homeMenuTopOffset + metrics.buttonHintsHeight)};
+  if (buttonPokemonMenu) {
+    menuRect.height = std::max(0, pageHeight - metrics.buttonHintsHeight - menuRect.y - 8);
+  }
   const Rect coverRect{0, metrics.homeTopPadding, pageWidth, metrics.homeCoverTileHeight};
   const auto labelAt = [&menuItems](int index) { return std::string(menuItems[index]); };
 
@@ -802,18 +967,54 @@ void HomeActivity::render(RenderLock&&) {
   GUI.drawRecentBookCover(renderer, drawnCover, recentBooks, selectorIndex, coverRendered, coverBufferStored,
                           bufferRestored, std::bind(&HomeActivity::storeCoverBuffer, this));
 
-  // CrossPlay Games/Apps folders are appended after the stock home rows.
-  for (int i = 0; i < shelf::folderCount(); ++i) {
-    menuItems.push_back(shelf::folders()[i].title);
-    menuIcons.push_back(shelf::folders()[i].icon);
+  const int renderedSelection =
+      metrics.homeContinueReadingInMenu ? selectorIndex : selectorIndex - static_cast<int>(recentBooks.size());
+  if (buttonPokemonMenu) {
+    // Measure without the theme's own page clamp, then hand every theme one
+    // page. In particular, Classic and Lyra do not scroll their Home rows.
+    const Rect measureRect{menuRect.x, menuRect.y, menuRect.width, pageHeight * 2};
+    int pageItems = static_cast<int>(menuItems.size());
+    while (pageItems > 1 && GUI.getMenuContentHeight(renderer, measureRect, pageItems) > menuRect.height) --pageItems;
+    const int start = (std::max(0, renderedSelection) / pageItems) * pageItems;
+    const int count = std::min(pageItems, static_cast<int>(menuItems.size()) - start);
+    GUI.drawButtonMenu(renderer, menuRect, count, renderedSelection < 0 ? -1 : renderedSelection - start,
+                       [&labelAt, start](int index) { return labelAt(start + index); },
+                       [&menuIcons, start](int index) { return menuIcons[start + index]; });
+  } else {
+    GUI.drawButtonMenu(renderer, menuRect, static_cast<int>(menuItems.size()), renderedSelection, labelAt,
+                       [&menuIcons](int index) { return menuIcons[index]; });
   }
 
-  GUI.drawButtonMenu(renderer, menuRect, static_cast<int>(menuItems.size()),
-                     metrics.homeContinueReadingInMenu ? selectorIndex : selectorIndex - recentBooks.size(), labelAt,
-                     [&menuIcons](int index) { return menuIcons[index]; });
+#if defined(CROSSINK_ENABLE_POKEMON)
+  // Pokémon occupies the lower-right column beside the final shelf row. The
+  // companion is lifted slightly so its art and dialogue remain clear.
+  if (!buttonPokemonMenu && homeShelfFolderCount() > 0 && companion.region.width > 0) {
+    const int pokemonRenderedRow = static_cast<int>(menuItems.size()) - 1;
+    const int rowStep = GUI.getMenuRowHeight(renderer) + metrics.menuSpacing;
+    // Lyra's drawButtonMenu adds contentSidePadding on both sides of the rect.
+    // Extend the outer rect one padding-width beyond the screen so the actual
+    // selection pill reaches the right edge, and shift it 8px left so the icon
+    // and label sit comfortably inside the display.
+    const int pokemonX = std::max(0, companionMenuWidth - metrics.contentSidePadding - 8);
+    const int pokemonRight = pageWidth;
+    Rect pokemonRect{pokemonX, menuRect.y + pokemonRenderedRow * rowStep, std::max(0, pokemonRight - pokemonX),
+                     GUI.getMenuRowHeight(renderer)};
+    const int pokemonMenuIndex = upstreamMenuRows() + homeShelfFolderCount();
+    const int pokemonSelectorIndex = static_cast<int>(recentBooks.size()) + pokemonMenuIndex;
+    GUI.drawButtonMenu(renderer, pokemonRect, 1, selectorIndex == pokemonSelectorIndex ? 0 : -1,
+                       [](int) { return std::string(tr(STR_POKEMON)); }, [](int) { return Pokemon; });
+  }
+#endif
 
   companionFrame++;
-  drawCompanion(companion.region);
+  Rect companionRegion = companion.region;
+  if (!buttonPokemonMenu && homeShelfFolderCount() > 0 && companionRegion.width > 0) {
+    // Lift only enough to tighten the column. A whole-row lift put the bubble
+    // over the third cover's title on the X4 Pro.
+    constexpr int lift = 44;
+    companionRegion.y = std::max(metrics.topPadding, companionRegion.y - lift);
+  }
+  drawCompanion(companionRegion);
 
   const auto labels = mappedInput.mapLabels(recentBooks.empty() ? "" : tr(STR_RESUME), tr(STR_SELECT), tr(STR_DIR_UP),
                                             tr(STR_DIR_DOWN));
@@ -845,9 +1046,21 @@ void HomeActivity::onSelectBook(const std::string& path) { activityManager.goToR
 
 void HomeActivity::onFileBrowserOpen() { activityManager.goToFileBrowser(); }
 
-void HomeActivity::onRecentsOpen() { activityManager.goToRecentBooks(); }
+void HomeActivity::onJournalOpen() { shelf::openItemFromHome(1, 0, renderer, mappedInput); }
 
 void HomeActivity::onSettingsOpen() { activityManager.goToSettings(); }
+
+
+#if defined(CROSSINK_ENABLE_POKEMON)
+void HomeActivity::onPokemonOpen() {
+  auto pokemonActivity = makeUniqueNoThrow<PokemonActivity>(renderer, mappedInput);
+  if (!pokemonActivity) return;
+  startActivityForResult(std::move(pokemonActivity), [this](const ActivityResult&) {
+    pokemonEncounterPending = pokemonEncounterPendingNow();
+    requestUpdate();
+  });
+}
+#endif
 
 void HomeActivity::onFileTransferOpen() { activityManager.goToFileTransfer(); }
 
@@ -870,6 +1083,9 @@ void HomeActivity::drawCompanionColumn(const Rect region, const char* label, con
 
   const auto id = CompanionTracker::activeId();
   const auto mood = COMPANION.currentMood();
+  // Pokémon art has quiet pixels below the visible feet. Pulling the label
+  // into that space closes the apparent gap without changing other companions.
+  const int labelGap = id == companion::CompanionId::Pokemon ? -22 : LABEL_GAP;
   const bool useInkBounds = id == companion::CompanionId::Noodle || id == companion::CompanionId::Lincoln;
 
   const int colX = region.x + MARGIN;
@@ -900,7 +1116,7 @@ void HomeActivity::drawCompanionColumn(const Rect region, const char* label, con
   const int pagerH = page.pages > 1 ? renderer.getLineHeight(SMALL_FONT_ID) + 1 : 0;
   const int bubbleH = lines.empty() ? 0 : page.count * lineH + PAD * 2 + pagerH;
   const int bubbleBlock = lines.empty() ? 0 : bubbleH + TAIL_LENGTH + BUBBLE_GAP;
-  const int statusBlock = LABEL_GAP + labelH + SUBLABEL_GAP + (sub[0] != '\0' ? subH : 0);
+  const int statusBlock = labelGap + labelH + SUBLABEL_GAP + (sub[0] != '\0' ? subH : 0);
 
   int scale = 0;
   const int maxScale = useInkBounds ? MAX_NOODLE_SCALE : MAX_SCALE;
@@ -944,7 +1160,7 @@ void HomeActivity::drawCompanionColumn(const Rect region, const char* label, con
   const int spriteTop = blockTop + bubbleBlock;
   const int drawX = laneX + (restless ? walkX : WALK_TRAVEL / 2);
   const int drawY = restless ? spriteTop + bob : spriteTop;
-  if (noodle) {
+  if (useInkBounds) {
     companion::drawPoseTrimmed(renderer, id, mood, drawX, drawY, scale, restless && walkingBack);
   } else {
     companion::drawPose(renderer, id, mood, drawX, drawY, scale, restless && walkingBack);
@@ -952,7 +1168,7 @@ void HomeActivity::drawCompanionColumn(const Rect region, const char* label, con
 
   const int labelW = renderer.getTextWidth(UI_10_FONT_ID, label, EpdFontFamily::BOLD);
   const int subW = sub[0] != '\0' ? renderer.getTextWidth(SMALL_FONT_ID, sub) : 0;
-  const int labelY = spriteTop + spriteH + BOB_HEIGHT + LABEL_GAP;
+  const int labelY = spriteTop + spriteH + BOB_HEIGHT + labelGap;
   const int centreX = colX + colW / 2;
   renderer.drawText(UI_10_FONT_ID, centreX - labelW / 2, labelY, label, true, EpdFontFamily::BOLD);
   if (subW > 0) {

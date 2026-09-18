@@ -126,7 +126,7 @@ struct ThemeMetrics {
 };
 
 enum UIIcon { None = 0, Folder, Text, Image, Book, File, Recent, Settings, Transfer, Library, Wifi, Hotspot, Bookmark,
-              Games, Apps };
+              Games, Apps, Pokemon };
 
 // Default theme implementation (Classic Theme)
 // Additional themes can inherit from this and override methods as needed
@@ -296,4 +296,5 @@ class BaseTheme {
   static constexpr int batteryPercentSpacing = 4;
   static void drawBatteryOutline(const GfxRenderer& renderer, int x, int y, int battWidth, int rectHeight);
   static void drawBatteryLightningBolt(const GfxRenderer& renderer, int boltX, int boltY);
+  static void drawUsbStatusIcon(const GfxRenderer& renderer, int x, int y);
 };

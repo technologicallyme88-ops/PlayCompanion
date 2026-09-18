@@ -29,6 +29,14 @@
 
 static portMUX_TYPE activityManagerSpinlock = portMUX_INITIALIZER_UNLOCKED;
 
+#ifndef CROSSPOINT_RENDER_TASK_STACK
+#if defined(CROSSINK_ENABLE_POKEMON) && !defined(BOARD_HAS_PSRAM)
+#define CROSSPOINT_RENDER_TASK_STACK 12288
+#else
+#define CROSSPOINT_RENDER_TASK_STACK 8192
+#endif
+#endif
+
 void ActivityManager::begin() {
 #if defined(configNUM_CORES) && configNUM_CORES > 1
   constexpr BaseType_t renderTaskCore = 1;
@@ -36,7 +44,7 @@ void ActivityManager::begin() {
   constexpr BaseType_t renderTaskCore = 0;
 #endif
   xTaskCreatePinnedToCore(&renderTaskTrampoline, "ActivityManagerRender",
-                          8192,               // Stack size
+                          CROSSPOINT_RENDER_TASK_STACK,
                           this,               // Parameters
                           1,                  // Priority
                           &renderTaskHandle,  // Task handle
@@ -270,7 +278,7 @@ void ActivityManager::goHome(HomeMenuItem initialMenuItem) {
     const auto& activityName = currentActivity->name;
     if (activityName == "FileBrowser") {
       initialMenuItem = HomeMenuItem::FILE_BROWSER;
-    } else if (activityName == "RecentBooks") {
+    } else if (activityName == "RecentBooks" || activityName == "ReadingJournal") {
       initialMenuItem = HomeMenuItem::RECENTS;
     } else if (activityName == "OpdsBookBrowser") {
       initialMenuItem = HomeMenuItem::OPDS_BROWSER;

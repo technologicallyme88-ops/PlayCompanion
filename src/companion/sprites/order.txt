@@ -5,3 +5,4 @@ vellum
 octavo
 noodle
 lincoln
+pokemon

@@ -17,6 +17,9 @@
 #include "ReaderFontSizes.h"
 #include "activities/settings/SettingsActivity.h"
 #include "companion/CompanionSprites.generated.h"
+#if defined(CROSSINK_ENABLE_POKEMON)
+#include "pokemon/PokemonCompanionBridge.h"
+#endif
 #include "util/DictionaryRegistry.h"
 
 // Build the font family setting dynamically. When registry is non-null, SD card fonts
@@ -211,6 +214,18 @@ inline SettingInfo buildCompanionCharacterSetting() {
   // the SDK submodule and losing it on the next update.
   s.enumStringValues.reserve(companion::COMPANION_COUNT);
   for (int i = 0; i < companion::COMPANION_COUNT; i++) {
+#if defined(CROSSINK_ENABLE_POKEMON)
+    if (i == static_cast<int>(companion::CompanionId::Pokemon)) {
+      // Static/base settings construction must not touch the SD card. The
+      // current leader label is refreshed after baseList is copied below.
+      s.enumStringValues.emplace_back("Pokemon (pokemon)");
+      continue;
+    }
+#else
+    // The generated Pokemon placeholder is an X4 Pro Pokemon integration
+    // detail. Hide it on builds that do not include the Pokemon app.
+    if (i == static_cast<int>(companion::CompanionId::Pokemon)) continue;
+#endif
     std::string label = companion::COMPANION_NAMES[i];
     label += " (";
     label += companion::COMPANION_KINDS[i];
@@ -494,6 +509,22 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
   }();
 
   std::vector<SettingInfo> v = baseList;
+
+#if defined(CROSSINK_ENABLE_POKEMON)
+  // STAGE 3B: dynamic party-lead Pokemon companion
+  // baseList is static, but the party leader is not. Refresh only this row on
+  // each settings-list request so Party -> Move immediately changes the label.
+  {
+    auto it = std::find_if(v.begin(), v.end(),
+                           [](const SettingInfo& s) { return s.nameId == StrId::STR_COMPANION_CHARACTER; });
+    if (it != v.end()) {
+      const size_t pokemonIndex = static_cast<size_t>(companion::CompanionId::Pokemon);
+      if (pokemonIndex < it->enumStringValues.size()) {
+        it->enumStringValues[pokemonIndex] = pokemon::pokemonCompanionOptionLabel();
+      }
+    }
+  }
+#endif
   if (!BoardConfig::hasTouch()) {
     v.erase(std::remove_if(v.begin(), v.end(),
                            [](const SettingInfo& s) { return s.nameId == StrId::STR_TOUCH_READER_CONTROLS; }),

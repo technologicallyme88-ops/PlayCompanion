@@ -13,6 +13,9 @@
 #include "EpubReaderMenuActivity.h"
 #include "ProgressMapper.h"
 #include "ReaderActivity.h"
+#if defined(CROSSINK_ENABLE_POKEMON)
+#include <PokemonTracker.h>
+#endif
 
 class EpubReaderActivity final : public ReaderActivity {
   std::shared_ptr<Epub> epub;
@@ -50,6 +53,12 @@ class EpubReaderActivity final : public ReaderActivity {
   unsigned long bookmarkMessageTime = 0UL;
   bool pendingReadFolderMove = false;
   bool journalFinishRecorded = false;
+#if defined(CROSSINK_ENABLE_POKEMON)
+  // A manual turn is credited only after the requested page actually renders.
+  pokemon::PokemonTurnVerifier pokemonTurnVerifier;
+  mutable bool pokemonEncounterPending = false;
+  uint32_t lastPokemonEncounterPollMs = 0;
+#endif
 
   // Footnote support
   std::vector<FootnoteEntry> currentPageFootnotes;
