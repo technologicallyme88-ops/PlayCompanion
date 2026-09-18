@@ -16,6 +16,7 @@
 #include "../ui/Toybox.h"
 #include "../ui/ToyboxFonts.h"
 #include "../ui/ToyboxTheme.h"
+#include "../ui/GameButtonPointer.h"
 #include "ConnectionsImport.h"
 #include "ConnectionsResults.h"
 
@@ -147,6 +148,9 @@ bool ConnectionsActivity::startPuzzle(const int index) {
   // board: reopening it after a week shows what you put down, not a new shuffle.
   game.start(puzzle, 0x9E3779B9u ^ (static_cast<uint32_t>(puzzle.id) * 2654435761u));
   toast = nullptr;
+  boardTileCursor = 0;
+  boardActionCursor = -1;
+  boardFocusedAction = fui::NO_ACTION;
   view = View::Board;
   return true;
 }
@@ -582,7 +586,15 @@ void ConnectionsActivity::routeAction(const fui::ActionEvent& event) {
         if (startPuzzle(pack.indexOnOrBefore(today()))) requestUpdate();
       } else if (event.value == 1) {
         view = View::Archive;
-        showMonthOf(lastDate != 0 && today() > lastDate ? lastDate : today());
+        // An unset RTC reports the Unix epoch (1970), which is technically a
+        // valid time_t but not a useful Connections date. Clamp both ends to
+        // the newest puzzle in the installed archive.
+        uint32_t anchor = today();
+        if (lastDate != 0 && (anchor < firstDate || anchor > lastDate)) anchor = lastDate;
+        archiveSelectedIndex = packOpen ? pack.indexOnOrBefore(anchor) : -1;
+        uint32_t selectedDate = anchor;
+        if (archiveSelectedIndex >= 0) pack.dateAt(archiveSelectedIndex, selectedDate);
+        showMonthOf(selectedDate);
         requestUpdate();
       } else if (event.value == 3) {
         view = View::HowTo;
@@ -642,10 +654,163 @@ void ConnectionsActivity::loop() {
     return;
   }
 
-  fui::InputSnapshot input;
+  // Native menu and board navigation for X3/X4. Focus is drawn by the
+  // controls themselves; there is no generic software pointer.
+  if (!mappedInput.hasTouch() && view == View::Menu) {
+    const bool canGet = !(packOpen && pack.count() > 0 && newestPackDate() >= today());
+    const int lastMenu = canGet ? 3 : 2;
+    if (mappedInput.wasReleased(MappedInputManager::Button::NavNext)) {
+      menuIndex = menuIndex >= lastMenu ? 0 : menuIndex + 1;
+      requestUpdate();
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::NavPrevious)) {
+      menuIndex = menuIndex <= 0 ? lastMenu : menuIndex - 1;
+      requestUpdate();
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      fui::ActionEvent chosen{};
+      chosen.action = ui::ActionNewest;
+      chosen.value = menuIndex == 0 ? 0 : (menuIndex == 1 ? 1 : (menuIndex == 2 ? 3 : 2));
+      routeAction(chosen);
+      return;
+    }
+  }
+
+  if (!mappedInput.hasTouch() && view == View::HowTo) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) ||
+        mappedInput.wasReleased(MappedInputManager::Button::NavNext) ||
+        mappedInput.wasReleased(MappedInputManager::Button::NavPrevious)) {
+      view = View::Menu;
+      requestUpdate();
+      return;
+    }
+  }
+
+  if (!mappedInput.hasTouch() && view == View::Board) {
+    if (game.result() != connections::Result::Playing) {
+      if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+        saveProgress();
+        view = View::Menu;
+        requestUpdate();
+        return;
+      }
+    } else {
+      const int tiles = game.tileCount();
+      if (tiles > 0 && boardTileCursor >= tiles) boardTileCursor = tiles - 1;
+
+      if (mappedInput.wasReleased(MappedInputManager::Button::ScreenLeft)) {
+        if (boardActionCursor >= 0) {
+          if (boardActionCursor > 0) --boardActionCursor;
+        } else if (boardTileCursor % 4 > 0) {
+          --boardTileCursor;
+        }
+        requestUpdate();
+        return;
+      }
+      if (mappedInput.wasReleased(MappedInputManager::Button::ScreenRight)) {
+        if (boardActionCursor >= 0) {
+          if (boardActionCursor < 2) ++boardActionCursor;
+        } else if (boardTileCursor + 1 < tiles && boardTileCursor % 4 < 3) {
+          ++boardTileCursor;
+        }
+        requestUpdate();
+        return;
+      }
+      if (mappedInput.wasReleased(MappedInputManager::Button::ScreenUp)) {
+        if (boardActionCursor >= 0) {
+          const int col = boardActionCursor == 0 ? 0 : (boardActionCursor == 1 ? 2 : 3);
+          const int lastRow = (tiles - 1) / 4;
+          int candidate = lastRow * 4 + col;
+          if (candidate >= tiles) candidate = tiles - 1;
+          boardTileCursor = candidate;
+          boardActionCursor = -1;
+        } else if (boardTileCursor >= 4) {
+          boardTileCursor -= 4;
+        }
+        requestUpdate();
+        return;
+      }
+      if (mappedInput.wasReleased(MappedInputManager::Button::ScreenDown)) {
+        if (boardActionCursor < 0) {
+          if (boardTileCursor + 4 < tiles) {
+            boardTileCursor += 4;
+          } else {
+            const int col = boardTileCursor % 4;
+            boardActionCursor = col == 0 ? 0 : (col == 3 ? 2 : 1);
+          }
+        }
+        requestUpdate();
+        return;
+      }
+      if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+        toast = nullptr;
+        if (boardActionCursor < 0) {
+          game.toggleTile(boardTileCursor);
+        } else if (boardActionCursor == 0) {
+          game.shuffle(game.seed() * 1103515245u + 12345u);
+          boardTileCursor = 0;
+          boardActionCursor = -1;
+        } else if (boardActionCursor == 1) {
+          game.deselectAll();
+        } else if (game.canSubmit()) {
+          handleSubmit();
+          if (game.tileCount() > 0 && boardTileCursor >= game.tileCount()) boardTileCursor = game.tileCount() - 1;
+        }
+        requestUpdate();
+        return;
+      }
+    }
+  }
+
+  // Archive navigation is native on X3/X4. Left/Right move one puzzle,
+  // Up/Down move roughly one week, Confirm opens the selected puzzle. Keeping
+  // selection as a pack index automatically skips the two unpublished dates.
+  if (view == View::Archive && !mappedInput.hasTouch() && packOpen && pack.count() > 0) {
+    int delta = 0;
+    if (mappedInput.wasReleased(MappedInputManager::Button::ScreenLeft)) delta = -1;
+    if (mappedInput.wasReleased(MappedInputManager::Button::ScreenRight)) delta = 1;
+    if (mappedInput.wasReleased(MappedInputManager::Button::ScreenUp)) delta = -7;
+    if (mappedInput.wasReleased(MappedInputManager::Button::ScreenDown)) delta = 7;
+    if (delta != 0) {
+      if (archiveSelectedIndex < 0) archiveSelectedIndex = pack.count() - 1;
+      archiveSelectedIndex += delta;
+      if (archiveSelectedIndex < 0) archiveSelectedIndex = 0;
+      if (archiveSelectedIndex >= pack.count()) archiveSelectedIndex = pack.count() - 1;
+      uint32_t selectedDate = 0;
+      if (pack.dateAt(archiveSelectedIndex, selectedDate)) showMonthOf(selectedDate);
+      requestUpdate();
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      if (archiveSelectedIndex >= 0 && startPuzzle(archiveSelectedIndex)) requestUpdate();
+      return;
+    }
+  }
+
+  fui::InputSnapshot input{};
   int tapX = 0;
   int tapY = 0;
-  if (mappedInput.wasScreenTapped(tapX, tapY)) {
+  bool tapped = mappedInput.wasScreenTapped(tapX, tapY);
+  const gameinput::PointerResult pointer = gameinput::readPointer(mappedInput, renderer, tapX, tapY);
+  if (pointer == gameinput::PointerResult::Moved) {
+    if (view == View::Board && interactionsReady) {
+      fui::InputSnapshot hover{};
+      hover.touchReleased = true;
+      hover.touchX = static_cast<int16_t>(gameinput::pointerState().x);
+      hover.touchY = static_cast<int16_t>(gameinput::pointerState().y);
+      const fui::ActionEvent hit = interactions.route(hover);
+      if (hit.action == ui::ActionShuffle || hit.action == ui::ActionDeselect || hit.action == ui::ActionSubmit)
+        boardFocusedAction = hit.action;
+      else
+        boardFocusedAction = fui::NO_ACTION;
+    }
+    requestUpdate();
+    return;
+  }
+  if (pointer == gameinput::PointerResult::Tap) tapped = true;
+  if (tapped) {
     input.touchReleased = true;
     input.touchX = static_cast<int16_t>(tapX);
     input.touchY = static_cast<int16_t>(tapY);
@@ -689,6 +854,14 @@ void ConnectionsActivity::render(RenderLock&&) {
       model.game = &game;
       model.date = game.puzzle().date;
       model.toast = toast;
+      if (mappedInput.hasTouch()) {
+        model.focusedAction = fui::NO_ACTION;
+        model.focusedTile = -1;
+      } else {
+        static const fui::ActionId actions[3] = {ui::ActionShuffle, ui::ActionDeselect, ui::ActionSubmit};
+        model.focusedAction = boardActionCursor >= 0 ? actions[boardActionCursor] : fui::NO_ACTION;
+        model.focusedTile = boardActionCursor < 0 ? boardTileCursor : -1;
+      }
       // Two passes with one slot rebound between them. Rebinding a font slot is
       // a single assignment on the target, so "three slots" was never a real
       // ceiling: the chrome speaks Jersey, the tiles speak the game's serif.
@@ -705,6 +878,16 @@ void ConnectionsActivity::render(RenderLock&&) {
       cal.month = calMonth;
       cal.cells = calCells;
       cal.playedThisMonth = calPlayed;
+      if (!mappedInput.hasTouch() && archiveSelectedIndex >= 0) {
+        uint32_t selectedDate = 0;
+        if (pack.dateAt(archiveSelectedIndex, selectedDate) &&
+            static_cast<int>(selectedDate / 10000) == calYear &&
+            static_cast<int>((selectedDate / 100) % 100) == calMonth) {
+          const int lead = connections::dayOfWeek(static_cast<uint32_t>(calYear) * 10000u +
+                                                  static_cast<uint32_t>(calMonth) * 100u + 1u);
+          if (lead >= 0) cal.cursor = lead + static_cast<int>(selectedDate % 100) - 1;
+        }
+      }
       cal.canPrevYear = canStepYear(-1);
       cal.canNextYear = canStepYear(1);
       cal.canPrevMonth = canStepMonth(-1);

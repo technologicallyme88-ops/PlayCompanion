@@ -29,7 +29,21 @@ void PlayerActivity::loop() {
     return;
   }
 
-  fui::InputSnapshot input;
+  if (!mappedInput.hasTouch()) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::NavNext)) {
+      selectedSlot = (selectedSlot + 1) % player::kSlotCount;
+      requestUpdate();
+    } else if (mappedInput.wasReleased(MappedInputManager::Button::NavPrevious)) {
+      selectedSlot = (selectedSlot + player::kSlotCount - 1) % player::kSlotCount;
+      requestUpdate();
+    } else if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      player::stepSlot(selectedSlot);
+      requestUpdate();
+    }
+    return;
+  }
+
+  fui::InputSnapshot input{};
   int tapX = 0;
   int tapY = 0;
   if (mappedInput.wasScreenTapped(tapX, tapY)) {
@@ -68,6 +82,7 @@ void PlayerActivity::render(RenderLock&&) {
 
   playerui::PlayerModel model;
   model.name = player::name();
+  model.selectedSlot = mappedInput.hasTouch() ? -1 : selectedSlot;
   const player::Name parts = player::parts();
   for (int slot = 0; slot < player::kSlotCount; ++slot) {
     // Never null: name() guarantees three words this build knows, and a saved
@@ -79,7 +94,7 @@ void PlayerActivity::render(RenderLock&&) {
   interactionsReady = true;
   toybox::reportOverflow(interactions, "Player");
 
-  const auto labels = mappedInput.mapLabels("Back", "", "", "");
+  const auto labels = mappedInput.mapLabels("Back", "Change", "Previous", "Next");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   renderer.displayBuffer();
 }

@@ -63,6 +63,13 @@ class ConnectionsActivity final : public Activity {
   View view = View::Menu;
   int menuIndex = 0;
   int puzzleIndex = -1;
+  // Native archive selection for button-only devices, stored as a pack index
+  // so crossing month boundaries is trivial and missing dates are skipped.
+  int archiveSelectedIndex = -1;
+  freeink::ui::ActionId boardFocusedAction = freeink::ui::NO_ACTION;
+  // Native X3/X4 board focus. action < 0 means a word tile is focused.
+  int boardTileCursor = 0;
+  int boardActionCursor = -1;  // 0 SHUFFLE, 1 CLEAR, 2 SUBMIT
 
   ImportStep importStep = ImportStep::Connecting;
   int importedCount = 0;

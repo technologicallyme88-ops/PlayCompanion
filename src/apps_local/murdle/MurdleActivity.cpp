@@ -13,6 +13,7 @@
 #include "../ui/ToyboxFonts.h"
 #include "../ui/ToyboxSeed.h"
 #include "../ui/ToyboxTheme.h"
+#include "../ui/GameButtonPointer.h"
 #include "MurdleCast.h"
 #include "MurdleText.h"
 
@@ -280,7 +281,14 @@ void MurdleActivity::loop() {
   fui::InputSnapshot input{};
   int tapX = 0;
   int tapY = 0;
-  if (mappedInput.wasScreenTapped(tapX, tapY)) {
+  bool tapped = mappedInput.wasScreenTapped(tapX, tapY);
+  const gameinput::PointerResult pointer = gameinput::readPointer(mappedInput, renderer, tapX, tapY);
+  if (pointer == gameinput::PointerResult::Moved) {
+    requestUpdate();
+    return;
+  }
+  if (pointer == gameinput::PointerResult::Tap) tapped = true;
+  if (tapped) {
     input.touchReleased = true;
     input.touchX = static_cast<int16_t>(tapX);
     input.touchY = static_cast<int16_t>(tapY);
@@ -560,6 +568,7 @@ void MurdleActivity::render(RenderLock&&) {
 
   // A new case and a verdict are page turns; a mark is not. Spend the full
   // refresh on meaning rather than on frames.
+  gameinput::drawPointer(renderer, mappedInput);
   renderer.displayBuffer(flashOnNextPaint ? HalDisplay::FULL_REFRESH : HalDisplay::FAST_REFRESH);
   flashOnNextPaint = false;
 }

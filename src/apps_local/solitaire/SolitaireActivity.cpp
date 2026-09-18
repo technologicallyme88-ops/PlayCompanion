@@ -10,6 +10,7 @@
 #include "../ui/Toybox.h"
 #include "../ui/ToyboxFonts.h"
 #include "../ui/ToyboxTheme.h"
+#include "../ui/GameButtonPointer.h"
 
 namespace {
 
@@ -225,10 +226,17 @@ void SolitaireActivity::loop() {
     return;
   }
 
-  fui::InputSnapshot input;
+  fui::InputSnapshot input{};
   int tapX = 0;
   int tapY = 0;
-  if (mappedInput.wasScreenTapped(tapX, tapY)) {
+  bool tapped = mappedInput.wasScreenTapped(tapX, tapY);
+  const gameinput::PointerResult pointer = gameinput::readPointer(mappedInput, renderer, tapX, tapY);
+  if (pointer == gameinput::PointerResult::Moved) {
+    requestUpdate();
+    return;
+  }
+  if (pointer == gameinput::PointerResult::Tap) tapped = true;
+  if (tapped) {
     input.touchReleased = true;
     input.touchX = static_cast<int16_t>(tapX);
     input.touchY = static_cast<int16_t>(tapY);
@@ -321,6 +329,7 @@ void SolitaireActivity::render(RenderLock&&) {
   const auto labels = mappedInput.mapLabels("Back", "", "", "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   // A win asked for the full blink; every other paint is the fast refresh.
+  gameinput::drawPointer(renderer, mappedInput);
   renderer.displayBuffer(flashOnNextPaint ? HalDisplay::FULL_REFRESH : HalDisplay::FAST_REFRESH);
   flashOnNextPaint = false;
 }

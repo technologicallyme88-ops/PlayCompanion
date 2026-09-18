@@ -66,8 +66,11 @@ void buildPlayer(toybox::Screen& screen, const PlayerModel& model) {
   // page. What is left below the words is one deliberate zone above the footer,
   // which is how chess leaves room for its capture strips -- slack gathered in
   // one place reads as a page, slack scattered reads as a mistake.
-  const fui::Rect face = fui::makeRect(static_cast<int16_t>(body.x + (body.width - kFaceSize) / 2),
-                                       static_cast<int16_t>(body.y + toybox::kGutter), kFaceSize, kFaceSize);
+  // Leave room for the word controls and hint on landscape button devices.
+  const int availableFace = body.height - toybox::kRowHeight - toybox::kGutter * 6 - 28;
+  const int16_t faceSize = availableFace >= kFaceSize ? kFaceSize : (availableFace >= 240 ? 240 : 120);
+  const fui::Rect face = fui::makeRect(static_cast<int16_t>(body.x + (body.width - faceSize) / 2),
+                                       static_cast<int16_t>(body.y + toybox::kGutter), faceSize, faceSize);
   player::drawAvatar(screen.target(), face, model.name, player::AvatarSize::Portrait);
 
   // Brackets rather than a box. A closed frame around a portrait reads as a
@@ -87,6 +90,7 @@ void buildPlayer(toybox::Screen& screen, const PlayerModel& model) {
   for (int slot = 0; slot < player::kSlotCount; ++slot) {
     fui::ButtonProps word;
     word.label = model.words[slot];
+    if (model.selectedSlot >= 0 && model.selectedSlot != slot) word.styles = toybox::rowStyles();
     word.action = ActionStepSlot;
     // One action, three values. The handler rolls `event.value`, so a fourth
     // slot would need no new id and no new branch.
@@ -102,7 +106,7 @@ void buildPlayer(toybox::Screen& screen, const PlayerModel& model) {
   hint.font = toybox::kSmallFont;
   hint.align = fui::TextAlign::Center;
   screen.target().text(fui::makeRect(body.x, static_cast<int16_t>(words.bottom() + toybox::kGutter), body.width, 28),
-                       "TAP A WORD TO CHANGE IT", hint);
+                       model.selectedSlot < 0 ? "TAP A WORD TO CHANGE IT" : "SELECT A WORD, PRESS CONFIRM", hint);
 }
 
 }  // namespace playerui

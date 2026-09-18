@@ -50,6 +50,11 @@ struct BoardModel {
   uint32_t date = 0;
   // Briefly shown after a wrong guess, then cleared. nullptr for none.
   const char* toast = nullptr;
+  // Bottom action currently under the X3/X4 pointer. NO_ACTION for touch or
+  // when the pointer is elsewhere.
+  fui::ActionId focusedAction = fui::NO_ACTION;
+  // Word tile carrying button-only focus, -1 for touch/action focus.
+  int focusedTile = -1;
 };
 
 // Where the four-row block landed, handed from the chrome pass to the tile pass.

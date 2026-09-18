@@ -12,6 +12,7 @@
 
 #include "../ui/ToyboxScreen.h"
 #include "KnucklebonesCore.h"
+#include "KnucklebonesRecord.h"
 
 namespace knuckleui {
 
@@ -53,6 +54,7 @@ struct MenuModel {
   int wins = 0;
   int losses = 0;
   int draws = 0;
+  knucklebones::Record pvp{};
 };
 
 struct HowToModel {
@@ -78,6 +80,8 @@ struct BoardModel {
   // Set while a remote opponent is thinking, so the board can say so rather
   // than looking frozen on a panel that takes half a second to repaint.
   bool waiting = false;
+  // -1 for touch/no explicit focus; 0..2 highlights the button-selected column.
+  int selectedColumn = -1;
 };
 
 struct ResultModel {

@@ -12,6 +12,7 @@
 #include "../ui/Toybox.h"
 #include "../ui/ToyboxFonts.h"
 #include "../ui/ToyboxTheme.h"
+#include "../ui/GameButtonPointer.h"
 #include "KnucklebonesBrain.h"
 #include "KnucklebonesScreens.h"
 
@@ -27,6 +28,7 @@ void KnucklebonesActivity::onEnter() {
   screen = kb::Screen::Menu;
   menuSelected = -1;
   loadHistory();
+  pvpRecord = kb::loadRecord("/.crosspoint/knucklebones-pvp.sav");
   requestUpdate();
 }
 
@@ -74,7 +76,7 @@ void KnucklebonesActivity::loadHistory() {
 }
 
 void KnucklebonesActivity::recordResult() {
-  if (resultRecorded) return;
+  if (resultRecorded || !kb::over(game)) return;
   resultRecorded = true;
 
   lastYours = game.grid[seat];
@@ -82,7 +84,12 @@ void KnucklebonesActivity::recordResult() {
   hasHistory = true;
   const int mine = kb::score(lastYours);
   const int theirs = kb::score(lastTheirs);
-  if (mine > theirs)
+  if (inMatch()) {
+    kb::addResult(pvpRecord, mine, theirs);
+    kb::addResult(opponentRecord, mine, theirs);
+    kb::saveRecord("/.crosspoint/knucklebones-pvp.sav", pvpRecord);
+    if (opponentRecordPath[0]) kb::saveRecord(opponentRecordPath, opponentRecord);
+  } else if (mine > theirs)
     ++wins;
   else if (theirs > mine)
     ++losses;
@@ -151,6 +158,8 @@ void KnucklebonesActivity::onMatchStart(const bool goesFirst) {
   // delivery is the real one, and dealing locally would only put a different
   // die on screen for the half second before that arrives.
   seat = goesFirst ? 0 : 1;
+  kb::recordPath(opponentName(), opponentRecordPath, sizeof(opponentRecordPath));
+  opponentRecord = kb::loadRecord(opponentRecordPath);
   resultRecorded = false;
   if (goesFirst) {
     kb::start(game, static_cast<uint32_t>(millis()) * 2654435761u + 1u);
@@ -167,7 +176,10 @@ bool KnucklebonesActivity::takeOpponentState() {
   return play.takeOpponent(game);
 }
 
-void KnucklebonesActivity::onRematch() { onMatchStart(play.goesFirst()); }
+void KnucklebonesActivity::onRematch() {
+  // The note handshake keeps the transport turn; its next sender deals.
+  onMatchStart(linkYourTurn());
+}
 
 void KnucklebonesActivity::onLinkEnded() {
   seat = 0;
@@ -211,10 +223,125 @@ void KnucklebonesActivity::gameLoop() {
     }
   }
 
-  fui::InputSnapshot input;
+  // Knucklebones is fully button-native on X3/X4: never fall through to the
+  // generic game pointer. The menu can be driven by either the front Left/Right
+  // buttons or the side Up/Down buttons; Confirm activates the focused choice.
+  if (!mappedInput.hasTouch() && screen == kb::Screen::Menu) {
+    const int count = static_cast<int>(knuckleui::MenuRow::Count);
+    if (menuSelected < 0 || menuSelected >= count) menuSelected = 0;
+
+    if (mappedInput.wasReleased(MappedInputManager::Button::NavNext)) {
+      menuSelected = (menuSelected + 1) % count;
+      requestUpdate();
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::NavPrevious)) {
+      menuSelected = (menuSelected + count - 1) % count;
+      requestUpdate();
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      switch (static_cast<knuckleui::MenuRow>(menuSelected)) {
+        case knuckleui::MenuRow::Play:
+          beginSoloMatch();
+          return;
+        case knuckleui::MenuRow::PlayNearby:
+          enterLink(linkplay::GameId::Knucklebones);
+          return;
+        case knuckleui::MenuRow::HowTo:
+          howToPage = 0;
+          goTo(kb::Screen::HowTo);
+          return;
+        case knuckleui::MenuRow::Count:
+          return;
+      }
+    }
+    return;
+  }
+
+  // How-to pages also stay pointer-free on X3/X4. Confirm advances; front
+  // Left/Right (and side Up/Down via NavPrevious/NavNext) move between pages.
+  if (!mappedInput.hasTouch() && screen == kb::Screen::HowTo) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::NavPrevious)) {
+      if (howToPage > 0) { --howToPage; requestUpdate(); }
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::NavNext)) {
+      if (howToPage + 1 < knuckleui::howToPages()) { ++howToPage; requestUpdate(); }
+      else goTo(kb::Screen::Menu);
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      if (howToPage + 1 < knuckleui::howToPages()) { ++howToPage; requestUpdate(); }
+      else goTo(kb::Screen::Menu);
+      return;
+    }
+    return;
+  }
+
+  // Result screen: Confirm starts another solo round (or proposes a rematch).
+  // Back keeps its normal flow behavior above. No pointer is needed.
+  if (!mappedInput.hasTouch() && screen == kb::Screen::Result) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      if (inMatch()) proposeRematch();
+      else beginSoloMatch();
+    }
+    return;
+  }
+
+  // During a turn there are only three meaningful targets, so front Left/Right
+  // selects a legal column and Confirm places the die there.
+  if (screen == kb::Screen::Board && !mappedInput.hasTouch()) {
+    const bool yourTurn = inMatch() ? linkYourTurn() : game.turn == seat;
+    if (!yourTurn || game.die == kb::kEmpty) return;
+
+    auto legal = [this](const int column) {
+      return column >= 0 && column < kb::kColumns && kb::columnCount(game.grid[seat], column) < kb::kRows;
+    };
+
+    if (!legal(selectedColumn)) {
+      for (int column = 0; column < kb::kColumns; ++column) {
+        if (legal(column)) {
+          selectedColumn = column;
+          break;
+        }
+      }
+    }
+
+    int direction = 0;
+    if (mappedInput.wasReleased(MappedInputManager::Button::Left)) direction = -1;
+    if (mappedInput.wasReleased(MappedInputManager::Button::Right)) direction = 1;
+    if (direction != 0) {
+      for (int step = 1; step <= kb::kColumns; ++step) {
+        const int candidate = (selectedColumn + direction * step + kb::kColumns * 2) % kb::kColumns;
+        if (legal(candidate)) {
+          selectedColumn = candidate;
+          requestUpdate();
+          return;
+        }
+      }
+    }
+
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) && legal(selectedColumn)) {
+      if (!kb::place(game, selectedColumn)) return;
+      if (inMatch()) play.play(game);
+      requestUpdate();
+      return;
+    }
+    return;
+  }
+
+  fui::InputSnapshot input{};
   int tapX = 0;
   int tapY = 0;
-  if (mappedInput.wasScreenTapped(tapX, tapY)) {
+  bool tapped = mappedInput.wasScreenTapped(tapX, tapY);
+  const gameinput::PointerResult pointer = gameinput::readPointer(mappedInput, renderer, tapX, tapY);
+  if (pointer == gameinput::PointerResult::Moved) {
+    requestUpdate();
+    return;
+  }
+  if (pointer == gameinput::PointerResult::Tap) tapped = true;
+  if (tapped) {
     input.touchReleased = true;
     input.touchX = static_cast<int16_t>(tapX);
     input.touchY = static_cast<int16_t>(tapY);
@@ -279,6 +406,23 @@ void KnucklebonesActivity::gameLoop() {
   }
 }
 
+void KnucklebonesActivity::drawLinkArt(const Rect& area) {
+  if (!kb::over(game)) return;
+  namespace fui = freeink::ui;
+  auto target = toybox::makeTarget(renderer);
+  fui::TextStyle style;
+  style.font = toybox::kTileFont;
+  style.align = fui::TextAlign::Center;
+  const int lineHeight = 24;
+  char text[64];
+  std::snprintf(text, sizeof(text), "FINAL: YOU %d   THEM %d", kb::score(game.grid[seat]), kb::score(game.grid[1 - seat]));
+  target.text(fui::makeRect(area.x, area.y, area.width, lineHeight), text, style);
+  target.text(fui::makeRect(area.x, area.y + lineHeight, area.width, lineHeight), "AGAINST THIS PLAYER", style);
+  std::snprintf(text, sizeof(text), "W %lu   L %lu   D %lu", static_cast<unsigned long>(opponentRecord.wins),
+                static_cast<unsigned long>(opponentRecord.losses), static_cast<unsigned long>(opponentRecord.draws));
+  target.text(fui::makeRect(area.x, area.y + lineHeight * 2, area.width, lineHeight), text, style);
+}
+
 void KnucklebonesActivity::gameRender() {
   namespace fui = freeink::ui;
 
@@ -300,6 +444,7 @@ void KnucklebonesActivity::gameRender() {
       model.wins = wins;
       model.losses = losses;
       model.draws = draws;
+      model.pvp = pvpRecord;
       knuckleui::buildMenu(surface, model);
       break;
     }
@@ -321,6 +466,7 @@ void KnucklebonesActivity::gameRender() {
       model.yourTurn = inMatch() ? linkYourTurn() : game.turn == seat;
       model.opponentName = inMatch() ? opponentName() : nullptr;
       model.waiting = inMatch() && !linkYourTurn();
+      model.selectedColumn = mappedInput.hasTouch() ? -1 : selectedColumn;
       knuckleui::buildBoard(surface, model);
       break;
     }
@@ -337,7 +483,12 @@ void KnucklebonesActivity::gameRender() {
   interactionsReady = true;
   toybox::reportOverflow(interactions, "Knucklebones");
 
-  const auto labels = mappedInput.mapLabels("Back", "", "", "");
+  const bool buttonOnly = !mappedInput.hasTouch();
+  const bool buttonBoard = screen == kb::Screen::Board && buttonOnly;
+  const auto labels = buttonBoard ? mappedInput.mapLabels("Back", "Select", "<", ">")
+                                  : buttonOnly ? mappedInput.mapLabels("Back", "Select", "Prev", "Next")
+                                               : mappedInput.mapLabels("Back", "", "", "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+  if (!buttonOnly) gameinput::drawPointer(renderer, mappedInput);
   renderer.displayBuffer();
 }

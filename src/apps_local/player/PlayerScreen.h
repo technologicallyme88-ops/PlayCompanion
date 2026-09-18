@@ -45,6 +45,7 @@ struct PlayerModel {
   // nothing else, which is why the model has no avatar field: there is no
   // second thing to keep in step.
   const char* name = "";
+  int selectedSlot = -1;
   // The three words, in order, as the buttons should read them. Passed rather
   // than re-split from `name` so the screen stays a pure function of its model
   // and a test can hand it a word list that does not parse.

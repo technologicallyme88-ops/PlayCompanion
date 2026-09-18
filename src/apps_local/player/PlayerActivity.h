@@ -27,4 +27,5 @@ class PlayerActivity final : public Activity {
  private:
   toybox::Interactions interactions;
   bool interactionsReady = false;
+  int selectedSlot = 0;
 };

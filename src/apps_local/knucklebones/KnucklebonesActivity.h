@@ -19,6 +19,7 @@
 #include "../link/LinkActivity.h"
 #include "../ui/ToyboxScreen.h"
 #include "KnucklebonesCore.h"
+#include "KnucklebonesRecord.h"
 #include "KnucklebonesFlow.h"
 
 class KnucklebonesActivity final : public linkplay::LinkActivity {
@@ -40,6 +41,8 @@ class KnucklebonesActivity final : public linkplay::LinkActivity {
   void onMatchStart(bool goesFirst) override;
   bool takeOpponentState() override;
   void onRematch() override;
+  void onMatchFinished() override { recordResult(); }
+  void drawLinkArt(const Rect& area) override;
   void onLinkEnded() override;
   bool matchGameOver() const override { return knucklebones::over(game); }
   void gameLoop() override;
@@ -53,11 +56,18 @@ class KnucklebonesActivity final : public linkplay::LinkActivity {
   // Written when a match ends, read once on entry.
   void recordResult();
   void loadHistory();
+  knucklebones::Record pvpRecord{};
+  knucklebones::Record opponentRecord{};
+  char opponentRecordPath[96] = {};
 
   knucklebones::Screen screen = knucklebones::Screen::Menu;
   knucklebones::Game game{};
   int howToPage = 0;
   int menuSelected = -1;
+  // X3/X4 button-native board selection. The three Knucklebones columns are
+  // the only choices needed during play, so non-touch devices move this with
+  // Left/Right and place with Confirm instead of using the generic pointer.
+  int selectedColumn = 1;
   // The seat this device plays. Always 0 against the built-in opponent, and set
   // from the coin toss in a match. Kept as a field rather than assumed so no
   // screen and no rule has to learn that seats exist.

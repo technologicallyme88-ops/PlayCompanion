@@ -99,6 +99,10 @@ void buildMenu(toybox::Screen& screen, const MenuModel& model) {
     fui::ButtonProps you;
     you.action = ActionOpenPlayer;
     screen.button(you, bar);
+    if (model.playerSelected) {
+      screen.target().stroke(fui::makeRect(bar.x - 3, bar.y - 3, bar.width + 6, bar.height + 6),
+                             fui::Paint::solid(fui::Color::Black), toybox::kHairline);
+    }
 
     // Both marks are drawn ON the bar, which the button has just filled solid
     // black, so both are paper. Drawn in ink they would be invisible and

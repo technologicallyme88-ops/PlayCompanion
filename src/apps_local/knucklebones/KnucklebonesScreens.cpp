@@ -4,6 +4,7 @@
 #include <cstdlib>
 
 #include "../link/LinkScreens.h"
+#include "../player/PlayerAvatar.h"
 
 namespace knuckleui {
 
@@ -196,13 +197,24 @@ void buildMenu(toybox::Screen& screen, const MenuModel& model) {
 
   // The front door in the documented band order: record, rule, the last match
   // as the ornament, doors anchored to the bottom with PLAY loudest.
-  char record[48];
-  std::snprintf(record, sizeof(record), "%d PLAYED   %d WON", model.wins + model.losses + model.draws, model.wins);
-  const fui::Rect line = screen.takeTop(26);
+  const fui::Rect line = screen.takeTop(96);
   fui::TextStyle small;
   small.font = toybox::kTileFont;
   small.align = fui::TextAlign::Left;
-  screen.target().text(line, record, small);
+  const int16_t half = line.width / 2;
+  char record[32];
+  const unsigned long totals[2][3] = {
+      {static_cast<unsigned long>(model.wins), static_cast<unsigned long>(model.losses), static_cast<unsigned long>(model.draws)},
+      {model.pvp.wins, model.pvp.losses, model.pvp.draws}};
+  const char* labels[3] = {"WINS", "LOSSES", "DRAWS"};
+  for (int side = 0; side < 2; ++side) {
+    const int16_t x = line.x + side * half;
+    screen.target().text(fui::makeRect(x, line.y, half, 24), side == 0 ? "COMPUTER" : "PvP", small);
+    for (int row = 0; row < 3; ++row) {
+      std::snprintf(record, sizeof(record), "%s %lu", labels[row], totals[side][row]);
+      screen.target().text(fui::makeRect(x, line.y + (row + 1) * 24, half, 24), record, small);
+    }
+  }
   screen.target().fill(fui::makeRect(line.x, static_cast<int16_t>(line.bottom() + 6), line.width, toybox::kRule),
                        fui::Paint::solid(fui::Color::Black));
 
@@ -240,24 +252,20 @@ void buildMenu(toybox::Screen& screen, const MenuModel& model) {
   // the app's own material and the app's own data, the only kind this fork
   // allows.
   const fui::DeviceContext device = screen.device();
-  constexpr int16_t kMini = 44;
-  constexpr int16_t kMiniGap = 4;
-  const int16_t gridH = static_cast<int16_t>(3 * kMini + 2 * kMiniGap);
-  const int16_t stackH = static_cast<int16_t>(gridH * 2 + 12 + 24 + 12);
   const int16_t areaTop = static_cast<int16_t>(line.bottom() + 6 + toybox::kRule);
   const int16_t room = static_cast<int16_t>(listBand.y - areaTop);
+  const int16_t fittedCell = static_cast<int16_t>((room - 32) / 6);
+  if (fittedCell < 8) return;
+  const int16_t kMini = fittedCell < 44 ? fittedCell : 44;
+  constexpr int16_t kMiniGap = 4;
+  const int16_t gridH = static_cast<int16_t>(3 * kMini + 2 * kMiniGap);
+  const int16_t stackH = static_cast<int16_t>(gridH * 2 + 16);
   const int16_t top = static_cast<int16_t>(areaTop + (room > stackH ? (room - stackH) / 2 : 0));
   const int16_t width = static_cast<int16_t>(kMini * kb::kColumns + kMiniGap * (kb::kColumns - 1));
   const int16_t left = static_cast<int16_t>((device.width - width) / 2);
 
   miniGrid(screen, left, top, kMini, model.lastTheirs.cell, false);
-  char tally[32];
-  std::snprintf(tally, sizeof(tally), "%d W   %d L   %d D", model.wins, model.losses, model.draws);
-  fui::TextStyle mid;
-  mid.font = toybox::kTileFont;
-  mid.align = fui::TextAlign::Center;
-  screen.target().text(fui::makeRect(content.x, static_cast<int16_t>(top + gridH + 12), content.width, 24), tally, mid);
-  miniGrid(screen, left, static_cast<int16_t>(top + gridH + 12 + 24 + 12), kMini, model.lastYours.cell, false);
+  miniGrid(screen, left, static_cast<int16_t>(top + gridH + 16), kMini, model.lastYours.cell, false);
 }
 
 // A grid drawn at an arbitrary size, for the how-to's diagrams. The board's own
@@ -414,7 +422,8 @@ void buildBoard(toybox::Screen& screen, const BoardModel& model) {
   // has no ellipsis glyph to truncate with. Chess does the same thing for the
   // same reason: the band is the device speaking, and who you are playing
   // belongs beside their face in the capsule, not in the chrome.
-  header.title = "KNUCKLEBONES";
+  const bool opponentTurn = model.opponentName != nullptr && !model.yourTurn;
+  header.title = opponentTurn ? "THEIR ROLL" : "KNUCKLEBONES";
   header.borderEdges = fui::EdgesNone;
   screen.header(header);
 
@@ -423,6 +432,13 @@ void buildBoard(toybox::Screen& screen, const BoardModel& model) {
   screen.insetContent(fui::Insets{0, 0, toybox::kMargin, 0});
 
   const fui::DeviceContext device = screen.device();
+
+  if (opponentTurn) {
+    const int16_t face = player::avatarPixels(player::AvatarSize::Row);
+    player::drawAvatar(screen.target(),
+                       fui::makeRect(device.width - toybox::kMargin - face, (toybox::kHeaderHeight - face) / 2, face, face),
+                       model.opponentName, player::AvatarSize::Row, fui::Color::White);
+  }
 
   // Taken before anything else is drawn, so the board can never grow into it.
   // This is the shape every other game in the fork ends on -- chess's BLACK TO
@@ -435,8 +451,10 @@ void buildBoard(toybox::Screen& screen, const BoardModel& model) {
   const fui::Rect capsule = screen.takeBottom(toybox::kPillHeight, toybox::kGutter);
   // Their face when there is a person at the other end. A name says somebody is
   // there; a face says who, and it is the same mark every link game draws.
-  screen.button(
-      status, model.opponentName != nullptr ? linkui::withOpponentFace(screen, capsule, model.opponentName) : capsule);
+  if (!opponentTurn) {
+    screen.button(
+        status, model.opponentName != nullptr ? linkui::withOpponentFace(screen, capsule, model.opponentName) : capsule);
+  }
 
   drawGrid(screen, model.theirs, false);
   drawGrid(screen, model.yours, true);
@@ -495,10 +513,14 @@ void buildBoard(toybox::Screen& screen, const BoardModel& model) {
   for (int column = 0; column < kb::kColumns; ++column) {
     if (kb::columnCount(model.yours, column) >= kb::kRows) continue;
     const fui::Rect where = columnRect(device, column, true);
-    // Marked as well as tappable. Nothing else on the board says where the die
-    // can go, and "the three columns of the near grid" is a rule the player has
-    // to be taught rather than one they can see.
-    bracket(screen, where);
+    // Keep the board treatment identical on every device: legal columns retain
+    // their normal grid outlines, and there is never a second/inset highlight.
+    // Button-driven X3/X4 devices use one bold outer bracket to show the column
+    // that SELECT will place into. Touch-driven X4 Pro has no persistent focus,
+    // so it keeps the same clean board with the columns themselves as tap targets.
+    if (column == model.selectedColumn) {
+      bracket(screen, where);
+    }
     fui::ButtonProps target;
     target.action = ActionColumn;
     target.value = static_cast<int16_t>(column);

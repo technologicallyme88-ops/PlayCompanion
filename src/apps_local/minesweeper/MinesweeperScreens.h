@@ -59,12 +59,15 @@ struct BoardModel {
   // drawn, and a tap on it switches: the board can then say what a tap will do
   // instead of the player having to remember.
   bool flagMode = false;
+  // Button-only focus for the DIG/FLAG control.
+  bool modeFocused = false;
 };
 
 struct ResultModel {
   bool won = false;
   int revealed = 0;
   int flagsRight = 0;
+  int selected = -1;  // 0 = PLAY AGAIN, 1 = DONE; -1 = touch-only
 };
 
 // The rect of one cell, and its exact inverse.

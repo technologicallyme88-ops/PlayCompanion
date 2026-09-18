@@ -246,6 +246,9 @@ void buildBoardTiles(toybox::Screen& screen, const BoardModel& model, const Boar
       screen.target().stroke(box, fui::Paint::solid(fui::Color::Black), toybox::kHairline);
     }
     drawTileText(screen, box, game.tileWord(i), chosen);
+    if (i == model.focusedTile) {
+      screen.target().stroke(box, fui::Paint::solid(chosen ? fui::Color::White : fui::Color::Black), 4);
+    }
   }
 }
 
@@ -295,7 +298,11 @@ void buildBoardStatus(toybox::Screen& screen, const BoardModel& model, const fui
       // and being told "ALREADY GUESSED" beats being left to wonder why the
       // button stopped working.
       button.enabled = ids[i] != ActionSubmit || game.canSubmit();
-      if (!button.enabled) button.styles = toybox::disabledButtonStyles();
+      // Action buttons are light at rest and black only when the button-only
+      // pointer is actually over them. This makes focus visible on X3/X4 while
+      // leaving X4 Pro touch controls in the same light resting state.
+      button.styles = button.enabled ? toybox::rowStyles() : toybox::disabledButtonStyles();
+      if (button.enabled && model.focusedAction == ids[i]) button.state = fui::StateSelected;
       screen.button(button, fui::makeRect(actions.x + i * (width + toybox::kGutter), actions.y, width, actions.height));
     }
   } else {
@@ -644,7 +651,13 @@ CalendarLayout buildCalendar(toybox::Screen& screen, const CalendarModel& model)
     if (day.inArchive) {
       screen.target().stroke(box, fui::Paint::solid(fui::Color::Black), toybox::kHairline);
     }
-    const fui::Color ink = fui::Color::Black;
+
+    // Button-only archive cursor: solid black cell with white date. The
+    // activity moves this cursor by puzzle index, so only playable dates can
+    // ever become selected.
+    const bool cursor = i == model.cursor && day.inArchive;
+    if (cursor) screen.target().fill(box, fui::Paint::solid(fui::Color::Black));
+    const fui::Color ink = cursor ? fui::Color::White : fui::Color::Black;
 
     // Today gets a second, heavier frame: on a screen of dates the one that
     // matters most should not need reading to find.
@@ -760,7 +773,9 @@ void buildMenu(toybox::Screen& screen, const MenuModel& model) {
   sub.font = toybox::kUiFont;
   sub.align = fui::TextAlign::Left;
   screen.target().text(fui::makeRect(body.x, body.y + 62, body.width, 26), todayState(model), sub);
-  screen.frame().hit(fui::makeRect(body.x, body.y, body.width, 96), ActionNewest, 0);
+  const fui::Rect todayBox = fui::makeRect(body.x, body.y, body.width, 96);
+  screen.frame().hit(todayBox, ActionNewest, 0);
+  if (model.selected == 0) screen.target().stroke(todayBox, fui::Paint::solid(fui::Color::Black), 4);
 
   screen.target().fill(fui::makeRect(body.x, body.y + 108, body.width, toybox::kRule),
                        fui::Paint::solid(fui::Color::Black));
@@ -816,7 +831,9 @@ void buildMenu(toybox::Screen& screen, const MenuModel& model) {
   fui::ListProps list;
   list.items = rows;
   list.count = 3;
-  list.selectedIndex = -1;
+  // Native menu order is TODAY, ARCHIVE, HOW TO, GET PUZZLES.
+  // The visible list itself is HOW TO, ARCHIVE, GET PUZZLES.
+  list.selectedIndex = model.selected == 1 ? 1 : (model.selected == 2 ? 0 : (model.selected == 3 ? 2 : -1));
   list.action = ActionNewest;
   screen.list(list, 3 * (toybox::kRowHeight + 4), fui::LayoutAnchor::Bottom);
 }

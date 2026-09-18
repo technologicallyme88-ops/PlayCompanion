@@ -69,34 +69,50 @@ void ShelfFolderActivity::loop() {
     input.touchX = static_cast<int16_t>(tapX);
     input.touchY = static_cast<int16_t>(tapY);
   }
-  // The two side keys PAGE. They are the only physical buttons the X4 Pro has,
-  // the case labels them previous and next page, and the reader turns pages with
-  // them -- so paging the shelf with them is consistency with what the hardware
-  // already says, not a new thing to learn. That is also why there is no
-  // on-screen hint for it: the affordance is moulded into the case.
+  // X3/X4 have no touch panel, so their Games folder needs the same native
+  // list controls as the rest of CrossPoint: side Up/Down OR front Left/Right
+  // move the row cursor, and Confirm opens the selected game. X4 Pro keeps the touch-first folder UI.
   //
-  // They used to move a CURSOR, opened with Confirm. On this device that was a
-  // dead end in the most literal way: `frontButtonConfirm` resolves to
-  // PIN_UNASSIGNED, which InputManager::begin skips entirely, so Confirm can
-  // never fire. You could move a selection you had no way to act on. The
-  // design language had already removed this exact input model from Chess and
-  // Connections for being a second, worse one running beside the real one;
-  // here it was second, worse, and broken.
-  //
-  // The page marks stay tappable. A button must never be the only route to
-  // something, or the invisible input model wins arguments it should not.
+  // This branch is intentionally before touch routing. It fixes the previous
+  // r11.2 behaviour where non-touch devices could enter Games but had no way
+  // to activate a row.
+  if (!mappedInput.hasTouch()) {
+    const bool hasPlayer = shelf::folders()[folder].showsDeviceName;
+    const int choices = itemCount + (hasPlayer ? 1 : 0);
+    if (choices <= 0) return;
+
+    if (mappedInput.wasReleased(MappedInputManager::Button::NavNext)) {
+      selected = (selected + 1) % choices;
+      requestUpdate();
+      return;
+    }
+
+    if (mappedInput.wasReleased(MappedInputManager::Button::NavPrevious)) {
+      selected = (selected + choices - 1) % choices;
+      requestUpdate();
+      return;
+    }
+
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      if (hasPlayer && selected == itemCount)
+        shelf::openPlayer(renderer, mappedInput);
+      else
+        shelf::openItem(folder, selected, renderer, mappedInput);
+      return;
+    }
+
+    return;
+  }
+
+  // Touch devices keep page-key paging and touch row activation. On X4 Pro
+  // Confirm is not a usable physical input, so this remains touch-first.
   const bool next = mappedInput.wasReleased(MappedInputManager::Button::Down);
   const bool prev = mappedInput.wasReleased(MappedInputManager::Button::Up);
 
   if (itemCount > 0 && (next || prev)) {
-    // Paging is moving the selection onto another page, because the page is
-    // DERIVED from the selection and stored nowhere. Same landing rule as
-    // tapping a page mark: the page's first row.
     const int pages = shelfui::pageCountFor(itemCount, rowsPerPage);
     if (pages > 1) {
       const int page = shelfui::pageFor(selected, rowsPerPage);
-      // Wraps, because there is no cursor to run off the end of and a page key
-      // that stops working at the last page reads as a broken key.
       const int landing = ((page + (next ? 1 : pages - 1)) % pages) * rowsPerPage;
       if (landing >= 0 && landing < itemCount) {
         selected = landing;
@@ -159,7 +175,8 @@ void ShelfFolderActivity::render(RenderLock&&) {
   // row it was not showing -- which is the bug the icons had, in a second place.
   const shelfui::Paging paging = shelfui::pagingFor(device, tokens, self.showsDeviceName, itemCount);
   rowsPerPage = paging.rowsPerPage;
-  const int page = shelfui::pageFor(selected, rowsPerPage);
+  const bool playerSelected = !mappedInput.hasTouch() && self.showsDeviceName && selected == itemCount;
+  const int page = shelfui::pageFor(playerSelected && itemCount > 0 ? itemCount - 1 : selected, rowsPerPage);
   const int first = page * rowsPerPage;
   // Short on the last page, which is the whole reason the screen is handed a
   // slice rather than the folder plus an offset. See MenuModel::items.
@@ -184,11 +201,10 @@ void ShelfFolderActivity::render(RenderLock&&) {
   model.count = onThisPage;
   // Page-relative, because the model is one page. The cursor is always on the
   // page being drawn: the page is derived from it.
-  // Never styled as a selection. `selected` is where the shelf will return you
-  // to, and which page to show -- it is not a cursor, and drawing it inverted on
-  // arrival would say "this is what you are about to do" to someone who has
-  // just walked in.
-  model.selected = -1;
+  // Non-touch X3/X4 need a visible row cursor so the user can see what Confirm
+  // will open. Touch X4 Pro preserves the original unselected presentation.
+  model.selected = mappedInput.hasTouch() || playerSelected ? -1 : selected - first;
+  model.playerSelected = playerSelected;
   model.playerName = self.showsDeviceName ? player::name() : nullptr;
   model.page = page;
   model.pageCount = paging.pageCount;

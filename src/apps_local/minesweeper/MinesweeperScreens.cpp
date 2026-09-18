@@ -244,7 +244,7 @@ void boardStrip(toybox::Screen& screen, const BoardModel& model) {
   mode.label = model.flagMode ? "FLAG" : "DIG";
   mode.action = ActionToggleMode;
   mode.styles = toybox::rowStyles();
-  mode.state = model.flagMode ? fui::StateSelected : fui::StateNormal;
+  mode.state = (model.flagMode || model.modeFocused) ? fui::StateSelected : fui::StateNormal;
   const int16_t modeWidth = static_cast<int16_t>(strip.width / 3);
   screen.button(mode,
                 fui::makeRect(static_cast<int16_t>(strip.right() - modeWidth), strip.y, modeWidth, strip.height));
@@ -444,11 +444,15 @@ void buildResult(toybox::Screen& screen, const ResultModel& model) {
   fui::ButtonProps done;
   done.label = "DONE";
   done.action = ActionDone;
+  done.styles = toybox::rowStyles();
+  if (model.selected == 1) done.state = fui::StateSelected;
   screen.button(done, screen.takeBottom(toybox::kPillHeight, toybox::kGutter));
 
   fui::ButtonProps again;
   again.label = "PLAY AGAIN";
   again.action = ActionAgain;
+  again.styles = toybox::rowStyles();
+  if (model.selected == 0) again.state = fui::StateSelected;
   screen.button(again, screen.takeBottom(toybox::kPillHeight, toybox::kGutter));
 
   const fui::Rect area = screen.body();

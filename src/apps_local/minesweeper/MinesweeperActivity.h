@@ -47,6 +47,12 @@ class MinesweeperActivity final : public Activity {
   bool flagMode = false;
   int howToPage = 0;
   int menuSelected = -1;
+  // Native X3/X4 board focus. row == kRows means the DIG/FLAG control.
+  int boardColumn = 0;
+  int boardRow = 0;
+  bool boardModeFocused = false;
+  // Native button focus for the two choices on the final result screen.
+  int resultSelected = 0;  // 0 = PLAY AGAIN, 1 = DONE
 
   bool hasHistory = false;
   minesweeper::Game lastBoard{};

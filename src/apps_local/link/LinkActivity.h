@@ -87,6 +87,8 @@ class LinkActivity : public Activity {
   // The match is over and the app is solo again: put the saved game back.
   virtual void onLinkEnded() = 0;
   virtual bool matchGameOver() const = 0;
+  // Called while the completed board still exists; implementations must be idempotent.
+  virtual void onMatchFinished() {}
   virtual void gameLoop() = 0;
   virtual void gameRender() = 0;
 

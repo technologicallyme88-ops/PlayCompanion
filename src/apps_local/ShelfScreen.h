@@ -69,6 +69,7 @@ struct MenuModel {
   //
   // Null when this folder does not show it; the footer disappears with it.
   const char* playerName = nullptr;
+  bool playerSelected = false;
   // Which page is showing, and how many there are. A pageCount of 1 draws no
   // page bar at all, so a folder that fits keeps every row it has.
   //

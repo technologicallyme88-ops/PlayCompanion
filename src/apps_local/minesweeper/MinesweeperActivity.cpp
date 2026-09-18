@@ -11,6 +11,7 @@
 #include "../ui/Toybox.h"
 #include "../ui/ToyboxFonts.h"
 #include "../ui/ToyboxTheme.h"
+#include "../ui/GameButtonPointer.h"
 #include "MinesweeperScreens.h"
 
 namespace ms = minesweeper;
@@ -34,7 +35,11 @@ void MinesweeperActivity::onEnter() {
   Activity::onEnter();
   toybox::ensureFonts(renderer);
   screen = ms::Screen::Menu;
-  menuSelected = -1;
+  menuSelected = mappedInput.hasTouch() ? -1 : 0;
+  boardColumn = 0;
+  boardRow = 0;
+  boardModeFocused = false;
+  resultSelected = 0;
   loadHistory();
   requestUpdate();
 }
@@ -111,6 +116,9 @@ void MinesweeperActivity::beginGame() {
   holdFired = false;
   flagMode = false;
   resultRecorded = false;
+  boardColumn = 0;
+  boardRow = 0;
+  boardModeFocused = false;
   goTo(ms::Screen::Board);
 }
 
@@ -124,6 +132,111 @@ void MinesweeperActivity::loop() {
     }
     goTo(ms::back(screen));
     return;
+  }
+
+  // Native button navigation for X3/X4. The generic software pointer is not
+  // used: focus belongs to the control itself.
+  if (!mappedInput.hasTouch()) {
+    if (screen == ms::Screen::Menu) {
+      if (mappedInput.wasReleased(MappedInputManager::Button::NavNext) ||
+          mappedInput.wasReleased(MappedInputManager::Button::NavPrevious)) {
+        menuSelected = 1 - (menuSelected < 0 ? 0 : menuSelected);
+        requestUpdate();
+        return;
+      }
+      if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+        if (menuSelected <= 0) beginGame();
+        else {
+          howToPage = 0;
+          goTo(ms::Screen::HowTo);
+        }
+        return;
+      }
+    }
+
+    if (screen == ms::Screen::HowTo) {
+      if (mappedInput.wasReleased(MappedInputManager::Button::NavNext) ||
+          mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+        if (howToPage + 1 < mineui::howToPages()) ++howToPage;
+        else goTo(ms::Screen::Menu);
+        requestUpdate();
+        return;
+      }
+      if (mappedInput.wasReleased(MappedInputManager::Button::NavPrevious)) {
+        if (howToPage > 0) --howToPage;
+        else goTo(ms::Screen::Menu);
+        requestUpdate();
+        return;
+      }
+    }
+
+    if (screen == ms::Screen::Board) {
+      if (ms::over(game)) {
+        if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+          goTo(ms::Screen::Result);
+          return;
+        }
+      } else {
+        if (mappedInput.wasReleased(MappedInputManager::Button::ScreenLeft)) {
+          if (boardModeFocused) boardModeFocused = false;
+          else if (boardColumn > 0) --boardColumn;
+          requestUpdate();
+          return;
+        }
+        if (mappedInput.wasReleased(MappedInputManager::Button::ScreenRight)) {
+          if (boardModeFocused) boardModeFocused = false;
+          else if (boardColumn + 1 < ms::kColumns) ++boardColumn;
+          requestUpdate();
+          return;
+        }
+        if (mappedInput.wasReleased(MappedInputManager::Button::ScreenUp)) {
+          if (boardModeFocused) {
+            boardModeFocused = false;
+            boardRow = ms::kRows - 1;
+          } else if (boardRow > 0) {
+            --boardRow;
+          }
+          requestUpdate();
+          return;
+        }
+        if (mappedInput.wasReleased(MappedInputManager::Button::ScreenDown)) {
+          if (!boardModeFocused) {
+            if (boardRow + 1 < ms::kRows) ++boardRow;
+            else boardModeFocused = true;
+          }
+          requestUpdate();
+          return;
+        }
+        if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+          if (boardModeFocused) {
+            flagMode = !flagMode;
+          } else {
+            const bool changed = flagMode ? ms::toggleFlag(game, boardColumn, boardRow)
+                                          : ms::reveal(game, boardColumn, boardRow);
+            if (changed && ms::over(game)) recordResult();
+          }
+          requestUpdate();
+          return;
+        }
+      }
+    }
+  }
+
+  // The result screen is a real two-item button menu on X3/X4. Do not make
+  // the user steer the generic pointer onto these large buttons: both front
+  // and side navigation keys move focus, and Confirm activates it.
+  if (screen == ms::Screen::Result && !mappedInput.hasTouch()) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::NavNext) ||
+        mappedInput.wasReleased(MappedInputManager::Button::NavPrevious)) {
+      resultSelected = 1 - resultSelected;
+      requestUpdate();
+      return;
+    }
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+      if (resultSelected == 0) beginGame();
+      else goTo(ms::Screen::Menu);
+      return;
+    }
   }
 
   // The rules decide when it is over; the record is written the moment they
@@ -178,10 +291,17 @@ void MinesweeperActivity::loop() {
     }
   }
 
-  fui::InputSnapshot input;
+  fui::InputSnapshot input{};
   int tapX = 0;
   int tapY = 0;
-  if (mappedInput.wasScreenTapped(tapX, tapY)) {
+  bool tapped = mappedInput.wasScreenTapped(tapX, tapY);
+  const gameinput::PointerResult pointer = gameinput::readPointer(mappedInput, renderer, tapX, tapY);
+  if (pointer == gameinput::PointerResult::Moved) {
+    requestUpdate();
+    return;
+  }
+  if (pointer == gameinput::PointerResult::Tap) tapped = true;
+  if (tapped) {
     input.touchReleased = true;
     input.touchX = static_cast<int16_t>(tapX);
     input.touchY = static_cast<int16_t>(tapY);
@@ -278,10 +398,11 @@ void MinesweeperActivity::render(RenderLock&&) {
     case ms::Screen::Board: {
       mineui::BoardModel model;
       model.game = game;
-      model.holdColumn = holdColumn;
-      model.holdRow = holdRow;
+      model.holdColumn = mappedInput.hasTouch() ? holdColumn : (boardModeFocused ? -1 : boardColumn);
+      model.holdRow = mappedInput.hasTouch() ? holdRow : (boardModeFocused ? -1 : boardRow);
       model.showMines = ms::over(game);
       model.flagMode = flagMode;
+      model.modeFocused = !mappedInput.hasTouch() && boardModeFocused;
       mineui::buildBoard(surface, model);
       break;
     }
@@ -299,6 +420,7 @@ void MinesweeperActivity::render(RenderLock&&) {
       }
       model.revealed = revealed;
       model.flagsRight = flagsRight;
+      model.selected = mappedInput.hasTouch() ? -1 : resultSelected;
       mineui::buildResult(surface, model);
       break;
     }

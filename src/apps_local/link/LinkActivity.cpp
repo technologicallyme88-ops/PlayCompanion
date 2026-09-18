@@ -80,6 +80,9 @@ bool LinkActivity::driveLink() {
     onMatchStart(linkState().goesFirst());
   }
 
+  // Preserve the result before an accepted rematch resets the local board.
+  if (inMatch() && matchGameOver()) onMatchFinished();
+
   // Notes first: one of them can end the wait, and acting on it in the same
   // pass is the difference between "instant" and "a screen refresh late".
   uint8_t note = 0;
@@ -103,7 +106,9 @@ bool LinkActivity::driveLink() {
     }
   }
 
+  // Apply incoming moves after a rematch reset, including its first move.
   if (takeOpponentState()) requestUpdate();
+  if (inMatch() && matchGameOver()) onMatchFinished();
 
   // A finished game is a question, so it goes to the same screen the rematch
   // uses rather than leaving a dead board with an inert capsule on it.
@@ -211,7 +216,15 @@ void LinkActivity::routeLinkScreen() {
     return;
   }
 
-  fui::InputSnapshot input;
+  if (!mappedInput.hasTouch()) {
+    if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) && linkModel().offerPlayAgain &&
+        you_ != linkui::SeatState::Ready) {
+      proposeRematch();
+    }
+    return;
+  }
+
+  fui::InputSnapshot input{};
   int tapX = 0;
   int tapY = 0;
   if (mappedInput.wasScreenTapped(tapX, tapY)) {
@@ -245,6 +258,8 @@ void LinkActivity::drawLinkScreen() {
   if (rematch_) drawLinkArt(Rect{slot.x, slot.y, slot.width, slot.height});
   interactionsReady = true;
   toybox::reportOverflow(interactions, "Link");
+  const auto labels = mappedInput.mapLabels("Back", linkModel().offerPlayAgain ? "Play Again" : "", "", "");
+  GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
 void LinkActivity::loop() {

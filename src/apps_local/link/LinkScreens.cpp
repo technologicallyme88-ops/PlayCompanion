@@ -21,7 +21,8 @@ constexpr int16_t kRailGap = toybox::kGutter;
 // head everyone starts from. That reads as "somebody will be here", which is
 // what LOOKING means, and it needed no special case to say it.
 void drawSeatFace(toybox::Screen& screen, const fui::Rect& row, const char* name) {
-  const int16_t size = player::avatarPixels(player::AvatarSize::Row);
+  const int16_t pixels = player::avatarPixels(player::AvatarSize::Row);
+  const int16_t size = row.height < pixels ? row.height : pixels;
   player::drawAvatar(screen.target(),
                      fui::makeRect(row.x, static_cast<int16_t>(row.y + (row.height - size) / 2), size, size),
                      name == nullptr ? "" : name, player::AvatarSize::Row);
@@ -113,7 +114,8 @@ fui::Rect buildLink(toybox::Screen& screen, const LinkModel& model) {
   title.label = model.headline;
   title.action = fui::NO_ACTION;
   title.borderEdges = fui::EdgesNone;
-  const fui::Rect headlineRow = screen.takeTop(toybox::kPillHeight, toybox::kGutter * 2);
+  const bool compact = screen.device().height < 650;
+  const fui::Rect headlineRow = screen.takeTop(toybox::kPillHeight, compact ? toybox::kGutter : toybox::kGutter * 2);
 
   // The mark gets its own strip rather than being laid over the label. The
   // headline centres its text across whatever width it is given, so overlapping
@@ -143,7 +145,7 @@ fui::Rect buildLink(toybox::Screen& screen, const LinkModel& model) {
   // framed, and anchored under the headline: the slack that is left becomes a
   // single deliberate zone above the footer, the way the board leaves room for
   // the captured strips rather than scattering emptiness through the layout.
-  const int16_t rowHeight = toybox::kRowHeight;
+  const int16_t rowHeight = compact ? 40 : toybox::kRowHeight;
   // Compact and anchored under the headline, not stretched to fill. Stretching
   // it turned the card into a framed void, which is worse than the slack below:
   // the slack reads as a page with a footer, the void read as a mistake. The
@@ -163,7 +165,8 @@ fui::Rect buildLink(toybox::Screen& screen, const LinkModel& model) {
                        model.linked ? fui::Paint::solid(fui::Color::Black) : fui::Paint::solid(fui::Color::DarkGray));
 
   const int16_t faceX = static_cast<int16_t>(rail.x + kRailWidth + kRailGap);
-  const int16_t faceSize = player::avatarPixels(player::AvatarSize::Row);
+  const int16_t facePixels = player::avatarPixels(player::AvatarSize::Row);
+  const int16_t faceSize = rowHeight < facePixels ? rowHeight : facePixels;
   const int16_t textX = static_cast<int16_t>(faceX + faceSize + kRailGap);
   const int16_t textWidth = static_cast<int16_t>(card.right() - toybox::kFrame - textX);
   const int16_t yourY = static_cast<int16_t>(card.y + toybox::kFrame);
