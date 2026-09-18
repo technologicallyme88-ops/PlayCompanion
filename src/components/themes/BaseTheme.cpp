@@ -85,6 +85,21 @@ void BaseTheme::drawBatteryLightningBolt(const GfxRenderer& renderer, int boltX,
   renderer.drawLine(boltX + 1, boltY + 7, boltX + 2, boltY + 7, false);
 }
 
+void BaseTheme::drawUsbStatusIcon(const GfxRenderer& renderer, int x, int y) {
+  // Compact USB trident: stem, arrow head, square branch, and round branch.
+  renderer.drawLine(x + 5, y + 2, x + 5, y + 11);
+  renderer.drawLine(x + 5, y + 2, x + 3, y + 4);
+  renderer.drawLine(x + 5, y + 2, x + 7, y + 4);
+  renderer.drawLine(x + 5, y + 7, x + 2, y + 7);
+  renderer.drawLine(x + 2, y + 7, x + 2, y + 5);
+  renderer.fillRect(x + 1, y + 4, 3, 3);
+  renderer.drawLine(x + 5, y + 9, x + 8, y + 9);
+  renderer.drawPixel(x + 9, y + 8);
+  renderer.drawPixel(x + 10, y + 9);
+  renderer.drawPixel(x + 9, y + 10);
+  renderer.drawPixel(x + 8, y + 9);
+}
+
 void BaseTheme::fillBatteryIcon(const GfxRenderer& renderer, Rect rect, uint16_t percentage) const {
   const bool charging = gpio.isUsbConnected();
 
@@ -430,8 +445,17 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
         ui.target.measureText(fui::GfxRendererTarget::FONT_SMALL, percentText, tokens.smallText).width);
   }
   const bool bluetoothConnected = BleHid.isRunning() && BleHid.isConnected();
+#if defined(FREEINK_DEVICE_X4PRO)
+  const bool usbConnected = gpio.isUsbConnected();
+#else
+  constexpr bool usbConnected = false;
+#endif
+  constexpr int16_t usbStatusIconWidth = 11;
+  constexpr int16_t usbStatusIconHeight = 13;
+  constexpr int16_t usbStatusIconGap = 5;
+  const int16_t usbReserve = usbConnected ? usbStatusIconWidth + usbStatusIconGap : 0;
   const int16_t bluetoothReserve = bluetoothConnected ? bluetoothStatusIconWidth + bluetoothStatusIconGap : 0;
-  const int16_t headerStatusReserve = static_cast<int16_t>(batteryReserve + bluetoothReserve);
+  const int16_t headerStatusReserve = static_cast<int16_t>(batteryReserve + usbReserve + bluetoothReserve);
 
   fui::HeaderProps props;
   props.title = title;
@@ -481,7 +505,9 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
 
   fui::BatteryIndicatorProps battery;
   battery.percent = static_cast<uint8_t>(percentage > 100 ? 100 : percentage);
-  battery.charging = gpio.isUsbConnected();
+  // X4 Pro reports a USB data connection, not charger state. Show a USB
+  // trident beside the battery instead of mislabelling it with a charge bolt.
+  battery.charging = gpio.isUsbConnected() && !usbConnected;
   battery.label = showBatteryPercentage ? percentText : nullptr;
   battery.text = tokens.smallText;
   battery.glyphWidth = static_cast<int16_t>(metrics.batteryWidth);
@@ -498,9 +524,19 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
   const int16_t batteryH = static_cast<int16_t>(metrics.batteryBarHeight);
   fui::batteryIndicator(ui.frame, fui::Rect{batteryX, band.y, batteryReserve, batteryH}, battery);
 
+  int statusX = batteryLeft ? batteryX + batteryReserve + usbStatusIconGap
+                            : batteryX - usbStatusIconGap - usbStatusIconWidth;
+  if (usbConnected) {
+    const int usbY = band.y + (batteryH - usbStatusIconHeight) / 2;
+    drawUsbStatusIcon(renderer, statusX, usbY);
+    statusX += batteryLeft ? usbStatusIconWidth + bluetoothStatusIconGap
+                           : -(bluetoothStatusIconWidth + bluetoothStatusIconGap);
+  }
+
   if (bluetoothConnected) {
-    const int bluetoothX = batteryLeft ? batteryX + batteryReserve + bluetoothStatusIconGap
-                                       : batteryX - bluetoothStatusIconGap - bluetoothStatusIconWidth;
+    const int bluetoothX = usbConnected ? statusX
+                                        : (batteryLeft ? batteryX + batteryReserve + bluetoothStatusIconGap
+                                                       : batteryX - bluetoothStatusIconGap - bluetoothStatusIconWidth);
     const int bluetoothY = band.y + (batteryH - bluetoothStatusIconHeight) / 2;
     drawBluetoothStatusIcon(renderer, bluetoothX, bluetoothY);
   }

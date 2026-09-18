@@ -264,6 +264,12 @@ bool HalGPIO::isUsbConnected() const {
     return false;
   }
   if (BoardConfig::ACTIVE.usbDetect < 0) {
+#if defined(FREEINK_DEVICE_X4PRO) && defined(ARDUINO_USB_MODE) && ARDUINO_USB_MODE
+    // The X4 Pro has no confirmed VBUS GPIO. Its ESP32-S3 USB-Serial/JTAG
+    // peripheral can still report a physical USB data connection without
+    // borrowing the GT911 interrupt pin or guessing at charger state.
+    return HWCDC::isPlugged();
+#endif
     return false;
   }
   return digitalRead(BoardConfig::ACTIVE.usbDetect) == HIGH;
