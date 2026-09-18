@@ -487,6 +487,21 @@ void releaseSdFontCachesForDecode(const GfxRenderer& renderer) {
 
 }  // namespace
 
+void SleepActivity::flushPanelWhite() const {
+  // Sleep images are long-lived retained frames, so give every panel a clean
+  // absolute white baseline before painting one. This intentionally uses the
+  // balanced HALF refresh instead of the multi-flash FULL refresh: HALF is the
+  // normal ghost-clearing/resync waveform across the supported X3/X4/X4 Pro
+  // panel drivers and avoids an unnecessary extra full-GC flash.
+  renderer.clearScreen();
+  renderer.displayBuffer(HalDisplay::HALF_REFRESH);
+
+  // displayBuffer() may swap the active framebuffer on dual-buffer builds.
+  // Clear the newly-active draw buffer too so the transient "Entering sleep"
+  // popup cannot redraw the pre-sleep activity behind itself.
+  renderer.clearScreen();
+}
+
 void SleepActivity::onEnter() {
   Activity::onEnter();
 
@@ -504,6 +519,13 @@ void SleepActivity::onEnter() {
 
   if (renderQuickResume) {
     return renderLastScreenSleepScreen();
+  }
+
+  // QUICK_RESUME and TRANSPARENT_CUSTOM deliberately retain the current
+  // screen, so de-ghosting them would defeat those modes. All ordinary sleep
+  // screens, on every supported device, get a white resync first.
+  if (SETTINGS.sleepScreen != CrossPointSettings::SLEEP_SCREEN_MODE::TRANSPARENT_CUSTOM) {
+    flushPanelWhite();
   }
 
   if (SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::TRANSPARENT_CUSTOM) {
