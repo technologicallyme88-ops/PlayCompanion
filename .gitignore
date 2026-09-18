@@ -62,3 +62,19 @@ flake.*
 # r8 local build/release artifacts
 /dist/
 /build_artifacts/
+
+# Local firmware build, test, and inspection artifacts
+/.pio-cache/
+/work/
+/outputs/
+/r11_2_work/
+/r11.4-x4pro-nimble-forced-legacy-fix/
+/*.log
+/*.zip
+/x4pro-build-error.txt
+/reader-indicator-*.txt
+
+# One-off source snapshots created while iterating locally
+*.bak
+*.r12bak
+*.pre-button-grid
