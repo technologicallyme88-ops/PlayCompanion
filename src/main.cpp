@@ -158,18 +158,23 @@ enum class BootResume : uint8_t {
 static bool deepSleepInProgress = false;
 
 #if FREEINK_CAP_TOUCH
+static bool wifiShutdownPending = false;
+
 static bool finishWifiSessionWithoutRestart() {
   if (!BoardConfig::hasTouch()) return false;
-
-  // A software reset does not cycle externally powered touch/frontlight rails.
-  // Shut down the network stack in place so those peripherals retain state.
-  if (esp_sntp_enabled()) {
-    esp_sntp_stop();
-  }
-  WiFi.mode(WIFI_OFF);
-  delay(100);
-  LOG_DBG("MAIN", "WiFi stopped without restart on touch device");
+  wifiShutdownPending = true;
+  LOG_DBG("MAIN", "WiFi shutdown deferred until activity exit completes");
   return true;
+}
+
+static void serviceDeferredWifiShutdown() {
+  if (!wifiShutdownPending) return;
+  wifiShutdownPending = false;
+  if (esp_sntp_enabled()) esp_sntp_stop();
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  delay(50);
+  LOG_DBG("MAIN", "Deferred WiFi shutdown complete");
 }
 #endif
 
@@ -909,6 +914,9 @@ void loop() {
 
   const unsigned long activityStartTime = millis();
   activityManager.loop();
+#if FREEINK_CAP_TOUCH
+  serviceDeferredWifiShutdown();
+#endif
   const unsigned long activityDuration = millis() - activityStartTime;
 
   const unsigned long loopDuration = millis() - loopStartTime;
