@@ -34,6 +34,8 @@ mkdir -p "$BUILD_DIR"
   ../../src/apps_local/connections/ConnectionsScreens.cpp \
   ../../src/apps_local/dungeon/DungeonCore.cpp \
   ../../src/apps_local/dungeon/DungeonScreens.cpp \
+  ../../src/apps_local/dungeonrun/DungeonRunCore.cpp \
+  ../../src/apps_local/dungeonrun/DungeonRunScreens.cpp \
   ../../src/apps_local/hackernews/HackerNewsScreens.cpp \
   ../../src/apps_local/insider/InsiderCore.cpp \
   ../../src/apps_local/insider/InsiderScreens.cpp \
