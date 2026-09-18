@@ -49,6 +49,7 @@ class EpubReaderActivity final : public ReaderActivity {
   bool recentsEntryRemoved = false;
   unsigned long bookmarkMessageTime = 0UL;
   bool pendingReadFolderMove = false;
+  bool journalFinishRecorded = false;
 
   // Footnote support
   std::vector<FootnoteEntry> currentPageFootnotes;

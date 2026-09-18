@@ -40,6 +40,7 @@
 #include "fontIds.h"
 #include "util/BookmarkUtil.h"
 #include "util/ScreenshotUtil.h"
+#include "apps_local/journal/ReadingJournal.h"
 
 namespace {
 constexpr int PAGE_TURN_RATES[] = {1, 1, 3, 6, 12};
@@ -130,6 +131,9 @@ void moveFinishedBookToReadFolder(const std::string& srcPath, const std::string&
   }
 
   RECENT_BOOKS.updatePath(srcPath, dstPath, oldCachePath, newCachePath);
+  if (!journal::updatePath(srcPath.c_str(), dstPath.c_str())) {
+    LOG_ERR("ERS", "Failed to update finished book's journal path");
+  }
   if (APP_STATE.openEpubPath == srcPath) {
     APP_STATE.openEpubPath = dstPath;
     APP_STATE.saveToFile();
@@ -1301,6 +1305,10 @@ void EpubReaderActivity::renderBook() {
 void EpubReaderActivity::onEndOfBookRendered() {
   automaticPageTurnActive = false;
   if (pendingSyncSaveError) {
+  if (!journalFinishRecorded && epub) {
+    journalFinishRecorded = journal::noteFinished(epub->getPath().c_str());
+    if (!journalFinishRecorded) LOG_ERR("ERS", "Could not record journal finish");
+  }
     pendingSyncSaveError = false;
     GUI.drawPopup(renderer, tr(STR_SAVE_PROGRESS_FAILED));
   }

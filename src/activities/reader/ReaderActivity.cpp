@@ -15,6 +15,7 @@
 #include "TxtReaderActivity.h"
 #include "XtcReaderActivity.h"
 #include "companion/CompanionTracker.h"
+#include "apps_local/journal/ReadingJournal.h"
 
 ReaderActivity::ReaderActivity(const char* name, GfxRenderer& renderer, MappedInputManager& mappedInput,
                                std::string bookPath, const bool allowFastInitialRefresh)
@@ -69,6 +70,9 @@ void ReaderActivity::onEnter() {
   APP_STATE.openEpubPath = bookPath;
   APP_STATE.saveToFile();
   RECENT_BOOKS.addBook(bookPath, getBookTitle(), getBookAuthor(), getBookThumbBmpPath());
+  if (!journal::noteStarted(bookPath.c_str(), getBookTitle().c_str(), getBookAuthor().c_str())) {
+    LOG_ERR("READER", "Could not record journal start");
+  }
   requestUpdate();
 }
 

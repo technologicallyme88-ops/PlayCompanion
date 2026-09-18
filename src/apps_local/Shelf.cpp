@@ -13,6 +13,7 @@
 #include "connections/ConnectionsActivity.h"
 #include "dungeon/DungeonActivity.h"
 #include "dungeonrun/DungeonRunActivity.h"
+#include "journal/ReadingJournalActivity.h"
 #include "knucklebones/KnucklebonesActivity.h"
 #include "minesweeper/MinesweeperActivity.h"
 #include "murdle/MurdleActivity.h"
@@ -35,6 +36,10 @@ constexpr shelf::Item kGames[] = {
     {"CONNECTIONS", &icon_connections_32, &ConnectionsActivity::create},
 };
 
+constexpr shelf::Item kApps[] = {
+    {"READING JOURNAL", &icon_hackernews_32, &ReadingJournalActivity::create},
+};
+
 // The Games row Home grows, in reading order. Titles are Title Case because
 // these sit in upstream's Home list and have to look like it; the folder screen
 // shouts its own header, which is our side of the line. A third folder is one row here and
@@ -42,6 +47,7 @@ constexpr shelf::Item kGames[] = {
 constexpr shelf::Folder kFolders[] = {
     {"Games", UIIcon::Games, &icon_games_32, kGames, static_cast<int>(sizeof(kGames) / sizeof(shelf::Item)), true},
 };
+    {"Apps", UIIcon::Apps, &icon_apps_32, kApps, static_cast<int>(sizeof(kApps) / sizeof(shelf::Item)), false},
 
 constexpr int kFolderCount = static_cast<int>(sizeof(kFolders) / sizeof(kFolders[0]));
 
