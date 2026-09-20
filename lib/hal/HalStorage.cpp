@@ -26,6 +26,7 @@ HalStorage::HalStorage() {
 bool HalStorage::begin() { return SDCard.begin(); }
 
 bool HalStorage::ready() const { return SDCard.ready(); }
+uint64_t HalStorage::totalBytes() const { return SDCard.sdTotalBytes(); }
 
 // For the rest of the methods, we acquire the mutex to ensure thread safety
 
@@ -34,6 +35,11 @@ class HalStorage::StorageLock {
   StorageLock() { xSemaphoreTakeRecursive(HalStorage::getInstance().storageMutex, portMAX_DELAY); }
   ~StorageLock() { xSemaphoreGiveRecursive(HalStorage::getInstance().storageMutex); }
 };
+
+uint64_t HalStorage::usedBytes() {
+  HalStorage::StorageLock lock;
+  return SDCard.sdUsedBytes();
+}
 
 #define HAL_STORAGE_WRAPPED_CALL(method, ...) \
   HalStorage::StorageLock lock;               \

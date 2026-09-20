@@ -182,7 +182,8 @@ bool finalizeEncounter(PokemonState& state, const uint16_t speciesId, const uint
   Gender gender = Gender::Unknown;
   if (species == nullptr || !chooseGender(*species, random, gender)) return false;
 
-  // Encounters do not otherwise use recordId, so retain whether this species was known before this event marked it seen.
+  // Encounters do not otherwise use recordId, so retain whether this species was known before this event marked it
+  // seen.
   const uint32_t previouslySeen = isSpeciesMarked(state.seenSpecies, speciesId) ? 1U : 0U;
   const PendingEvent event{previouslySeen, speciesId, level, gender, EvolutionItem::None, PendingEventKind::Encounter};
   if (!enqueuePendingEvent(state, event) || !markSpecies(state.seenSpecies, speciesId)) return false;
@@ -348,7 +349,8 @@ CreditResult applyCreditedMinutes(PokemonState& state, PokemonRecord& leader, co
       if (!processHourlyItem(stateCandidate, random, ownedEvolutionNeeds, generatedEvent)) return result;
     }
 
-    if (hourlyBoundary || stateCandidate.readingMinuteRemainder % ENCOUNTER_CHECK_MINUTES == 0) {
+    if (stateCandidate.encountersEnabled &&
+        (hourlyBoundary || stateCandidate.readingMinuteRemainder % ENCOUNTER_CHECK_MINUTES == 0)) {
       if (!processEncounterCheck(stateCandidate, bookProgressPercent, random, generatedEvent)) {
         return result;
       }

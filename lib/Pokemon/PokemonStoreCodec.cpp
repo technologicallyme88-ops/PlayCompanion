@@ -55,6 +55,7 @@ PendingEvent decodePendingEvent(const uint8_t* bytes) {
 
 size_t snapshotStateBytes(const uint16_t version) {
   if (version == POKEMON_SNAPSHOT_VERSION_V1) return POKEMON_STATE_V1_BYTES;
+  if (version == POKEMON_SNAPSHOT_VERSION_V2) return POKEMON_STATE_V2_BYTES;
   if (version == POKEMON_SNAPSHOT_VERSION) return POKEMON_STATE_BYTES;
   return 0;
 }
@@ -136,6 +137,7 @@ bool encodeState(const PokemonState& state, StateBytes& output) {
   candidate[113] = state.encounterMisses;
   candidate[114] = state.itemMisses;
   candidate[115] = static_cast<uint8_t>(state.dashboardNotice);
+  candidate[116] = state.encountersEnabled ? 1U : 0U;
   output = candidate;
   return true;
 }
@@ -172,6 +174,10 @@ bool decodeState(const uint8_t* bytes, const size_t size, const uint16_t version
     candidate.encounterMisses = bytes[113];
     candidate.itemMisses = bytes[114];
     candidate.dashboardNotice = static_cast<DashboardNotice>(bytes[115]);
+    if (version == POKEMON_SNAPSHOT_VERSION) {
+      if (bytes[116] > 1U) return false;
+      candidate.encountersEnabled = bytes[116] != 0;
+    }
   }
   if (!validateState(candidate)) return false;
   output = candidate;

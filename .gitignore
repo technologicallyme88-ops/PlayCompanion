@@ -78,3 +78,9 @@ flake.*
 *.bak
 *.r12bak
 *.pre-button-grid
+
+# Android/Gradle machine-local build artifacts
+/android/.gradle-user-home/
+/android/.gradle/
+/gradle-release-cache/
+/android/local.properties

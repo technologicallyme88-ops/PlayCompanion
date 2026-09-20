@@ -61,6 +61,7 @@ class PokemonService {
   ServiceStatus acknowledgeItem();
   ServiceStatus resolveEvolution(EvolutionChoice choice);
   ServiceStatus setEvolutionPrompts(uint32_t recordId, bool enabled);
+  ServiceStatus setEncountersEnabled(bool enabled);
   ServiceStatus useEvolutionItem(uint32_t recordId, EvolutionItem item);
   ServiceStatus reset();
 

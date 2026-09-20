@@ -395,6 +395,8 @@ void CrossPointWebServer::handleStatus() const {
   doc["mode"] = apMode ? "AP" : "STA";
   doc["rssi"] = apMode ? 0 : WiFi.RSSI();
   doc["freeHeap"] = ESP.getFreeHeap();
+  doc["storageTotal"] = Storage.totalBytes();
+  doc["storageUsed"] = Storage.usedBytes();
   doc["uptime"] = millis() / 1000;
 #if FREEINK_DEVICE_X4 || FREEINK_DEVICE_X3
   doc["device"] = gpio.deviceIsX3() ? "X3" : "X4";

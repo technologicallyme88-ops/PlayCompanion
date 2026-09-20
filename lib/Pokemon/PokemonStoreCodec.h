@@ -9,9 +9,11 @@
 namespace pokemon {
 
 constexpr uint16_t POKEMON_SNAPSHOT_VERSION_V1 = 1;
-constexpr uint16_t POKEMON_SNAPSHOT_VERSION = 2;
+constexpr uint16_t POKEMON_SNAPSHOT_VERSION_V2 = 2;
+constexpr uint16_t POKEMON_SNAPSHOT_VERSION = 3;
 constexpr size_t POKEMON_STATE_V1_BYTES = 96;
-constexpr size_t POKEMON_STATE_BYTES = 116;
+constexpr size_t POKEMON_STATE_V2_BYTES = 116;
+constexpr size_t POKEMON_STATE_BYTES = 117;
 using StateBytes = std::array<uint8_t, POKEMON_STATE_BYTES>;
 
 constexpr size_t POKEMON_SNAPSHOT_HEADER_BYTES = 24;

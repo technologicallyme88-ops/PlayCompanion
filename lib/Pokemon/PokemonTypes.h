@@ -105,6 +105,7 @@ struct PokemonState {
   uint8_t encounterMisses = 0;
   uint8_t itemMisses = 0;
   DashboardNotice dashboardNotice = DashboardNotice::None;
+  bool encountersEnabled = true;
 
   bool operator==(const PokemonState&) const = default;
 };

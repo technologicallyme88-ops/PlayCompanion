@@ -13,8 +13,8 @@
 #include "OpdsServerStore.h"
 #include "boot_sleep/BootActivity.h"
 #include "boot_sleep/SleepActivity.h"
-#include "companion/CompanionTracker.h"
 #include "browser/OpdsBookBrowserActivity.h"
+#include "companion/CompanionTracker.h"
 #include "home/CrashActivity.h"
 #include "home/FileBrowserActivity.h"
 #include "home/HomeActivity.h"
@@ -28,6 +28,10 @@
 #include "util/FullScreenMessageActivity.h"
 
 static portMUX_TYPE activityManagerSpinlock = portMUX_INITIALIZER_UNLOCKED;
+
+namespace {
+constexpr unsigned long BACK_HOME_HOLD_MS = 1000;
+}
 
 #ifndef CROSSPOINT_RENDER_TASK_STACK
 #if defined(CROSSINK_ENABLE_POKEMON) && !defined(BOARD_HAS_PSRAM)
@@ -43,8 +47,7 @@ void ActivityManager::begin() {
 #else
   constexpr BaseType_t renderTaskCore = 0;
 #endif
-  xTaskCreatePinnedToCore(&renderTaskTrampoline, "ActivityManagerRender",
-                          CROSSPOINT_RENDER_TASK_STACK,
+  xTaskCreatePinnedToCore(&renderTaskTrampoline, "ActivityManagerRender", CROSSPOINT_RENDER_TASK_STACK,
                           this,               // Parameters
                           1,                  // Priority
                           &renderTaskHandle,  // Task handle
@@ -89,6 +92,15 @@ void ActivityManager::loop() {
   COMPANION.tick();
 
   if (currentActivity) {
+    // X3/X4 have no dedicated Home key. A deliberate Back hold provides the
+    // same direct escape from any activity; short Back releases still belong
+    // to the activity itself.
+    if (!currentActivity->isHomeActivity() && gpio.isXteinkDevice() &&
+        mappedInput.wasReleased(MappedInputManager::Button::Back) && mappedInput.getHeldTime() >= BACK_HOME_HOLD_MS) {
+      goHome();
+      return;
+    }
+
     if (!currentActivity->isHomeActivity() && mappedInput.wasHomeGesture()) {
       if (currentActivity->handleHomeGesture()) {
         return;

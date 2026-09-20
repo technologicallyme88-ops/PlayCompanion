@@ -175,7 +175,7 @@ int PokemonActivity::logicalCount() const {
     case Screen::ReleaseConfirm:
       return screen_ == Screen::Move ? snapshot_.partyCount : 2;
     case Screen::Menu:
-      return 6;
+      return 7;
     case Screen::Party:
       return pokemon::PARTY_SIZE;
     case Screen::Actions: {
@@ -208,7 +208,8 @@ int PokemonActivity::listTop() const {
   const auto& metrics = UITheme::getInstance().getMetrics();
   int top = metrics.topPadding + TouchHeaderBackButton::height(metrics, mappedInput) + metrics.verticalSpacing;
   if (screen_ == Screen::Starter || screen_ == Screen::ResetFirst || screen_ == Screen::ResetFinal ||
-      screen_ == Screen::ReleaseConfirm) top += 72;
+      screen_ == Screen::ReleaseConfirm)
+    top += 72;
   if (screen_ == Screen::Gender) top += 180;
   if (screen_ == Screen::NicknameQuestion) top += 210;
   return top;
@@ -310,7 +311,12 @@ void PokemonActivity::activate() {
         setScreen(Screen::PcOrder, static_cast<int>(pcOrder_));
       else if (selected_ == 4)
         setScreen(Screen::Bag);
-      else
+      else if (selected_ == 5) {
+        if (service_.setEncountersEnabled(!snapshot_.state.encountersEnabled) != pokemon::ServiceStatus::Ok)
+          showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Menu);
+        else if (refreshSnapshot())
+          setScreen(Screen::Menu, 5);
+      } else
         setScreen(Screen::ResetFirst);
       return;
     case Screen::Party:
@@ -599,8 +605,7 @@ void PokemonActivity::loop() {
     int touchX = 0;
     int touchY = 0;
     if (mappedInput.wasScreenLongPress(touchX, touchY)) {
-      if (rowHeight_ > 0 &&
-          touchX >= listBounds_.x && touchX < listBounds_.x + listBounds_.width &&
+      if (rowHeight_ > 0 && touchX >= listBounds_.x && touchX < listBounds_.x + listBounds_.width &&
           touchY >= listBounds_.y && touchY < listBounds_.y + listBounds_.height) {
         const int local = (touchY - listBounds_.y) / rowHeight_;
         if (local >= 0 && local < rowCount_ && local < static_cast<int>(pcCount_)) {
@@ -613,6 +618,27 @@ void PokemonActivity::loop() {
             return;
           }
         }
+      }
+    }
+  }
+  // Encounter choices are destructive: resolve them only through an explicit
+  // tap inside the rendered Catch or Pass row. Keeping them out of FreeInkUI's
+  // generic list router also makes every other part of the encounter inert.
+  if (screen_ == Screen::Event) {
+    const pokemon::PendingEvent* pending = pokemon::pendingEventFront(snapshot_.state);
+    if (pending != nullptr && pending->kind == pokemon::PendingEventKind::Encounter) {
+      int row = -1;
+      const auto touch = mappedInput.rowTouch(row, listBounds_.y, rowHeight_, rowCount_, listBounds_.x,
+                                              listBounds_.x + listBounds_.width, rowHeight_);
+      if (touch == MappedInputManager::RowTouch::Down && row >= 0 && row < 2) {
+        selected_ = row;
+        requestUpdate();
+        return;
+      }
+      if (touch == MappedInputManager::RowTouch::Tap && row >= 0 && row < 2) {
+        selected_ = row;
+        activate();
+        return;
       }
     }
   }
@@ -683,12 +709,15 @@ void PokemonActivity::buildRows() {
         row(local, index == 0 ? tr(STR_YES) : tr(STR_NO));
         break;
       case Screen::Menu:
-        row(local, index == 0   ? tr(STR_POKEMON_PARTY)
-                   : index == 1 ? tr(STR_POKEDEX)
-                   : index == 2 ? tr(STR_POKEMON_PC_BOX)
-                   : index == 3 ? tr(STR_POKEMON_PC_SORT)
-                   : index == 4 ? tr(STR_POKEMON_BAG)
-                                : tr(STR_POKEMON_RESET));
+        row(local,
+            index == 0   ? tr(STR_POKEMON_PARTY)
+            : index == 1 ? tr(STR_POKEDEX)
+            : index == 2 ? tr(STR_POKEMON_PC_BOX)
+            : index == 3 ? tr(STR_POKEMON_PC_SORT)
+            : index == 4 ? tr(STR_POKEMON_BAG)
+            : index == 5 ? tr(STR_POKEMON_ENCOUNTERS)
+                         : tr(STR_POKEMON_RESET),
+            index == 5 ? (snapshot_.state.encountersEnabled ? tr(STR_POKEMON_ON) : tr(STR_POKEMON_OFF)) : nullptr);
         break;
       case Screen::Party:
       case Screen::Move:
@@ -737,7 +766,8 @@ void PokemonActivity::buildRows() {
       case Screen::Pc: {
         if (local == 0) {
           pcCount_ = 0;
-          if (service_.readPcPage(pcOrder_, start, std::span<pokemon::PokemonRecord>(pcPage_).first(rowsPerPage()), pcCount_) != pokemon::ServiceStatus::Ok) {
+          if (service_.readPcPage(pcOrder_, start, std::span<pokemon::PokemonRecord>(pcPage_).first(rowsPerPage()),
+                                  pcCount_) != pokemon::ServiceStatus::Ok) {
             rowCount_ = 1;
             row(local, tr(STR_POKEMON_LOAD_ERROR));
             break;
@@ -812,7 +842,9 @@ void PokemonActivity::buildList(UiApp::ScreenType& screen) {
   props.count = static_cast<uint16_t>(std::max(0, rowCount_));
   props.selectedIndex = static_cast<int16_t>(selected_ - pageStart());
   props.action = ACTION_ROW;
-  props.inputMask = fui::InputTouch;
+  // Encounters use the explicit bounded hit-test in loop(); the generic list
+  // router remains appropriate for every non-destructive list.
+  props.inputMask = screen_ == Screen::Event ? fui::InputNone : fui::InputTouch;
   props.rowHeight = static_cast<int16_t>(rowHeight_);
   props.rowGap = 0;
   // A Game Boy-style cursor keeps every choice on white paper. Grey dither
@@ -823,7 +855,7 @@ void PokemonActivity::buildList(UiApp::ScreenType& screen) {
   props.rowStyles = presentation.rowStyles;
   props.selectionMarker = fui::SelectionMarker::Triangle;
   props.markerInset = static_cast<int16_t>(presentation.markerInset);
-// FreeInkUI positions a trailing value at:
+  // FreeInkUI positions a trailing value at:
   //   bandRight - valueInset
   // Artwork rows intentionally reserve 104 px on both sides. Rather than
   // changing the left-side geometry (which caused the Pokédex sprite overlap),
@@ -831,10 +863,10 @@ void PokemonActivity::buildList(UiApp::ScreenType& screen) {
   // otherwise-unused right artwork gutter while leaving the number/name start
   // exactly where the donor intended it.
   props.valueInset = screen_ == Screen::Pokedex ? -84 : 8;
-  
+
   /* Stage 3C.3 PARTY FLEX */
-  if (screen_ == Screen::Party || screen_ == Screen::Move || screen_ == Screen::ItemTarget ||
-      screen_ == Screen::Pc || screen_ == Screen::Pokedex) {
+  if (screen_ == Screen::Party || screen_ == Screen::Move || screen_ == Screen::ItemTarget || screen_ == Screen::Pc ||
+      screen_ == Screen::Pokedex) {
     /* Stage 3D.2B POKEDEX PC FLEX */
     // Keep enough left inset for the 80px Pokemon art + cursor, but do NOT
     // reserve the same huge inset on the right. ListProps measures the complete
@@ -849,7 +881,8 @@ void PokemonActivity::buildList(UiApp::ScreenType& screen) {
     props.markerInset = presentation.markerInset > 36 ? presentation.markerInset - 36 : 0;
   } else {
     props.valueInset = 8;
-  }screen.list(props);
+  }
+  screen.list(props);
 }
 
 void PokemonActivity::buildUi(UiApp::ScreenType& screen) {
@@ -901,8 +934,8 @@ void PokemonActivity::renderFocused() {
   if (screen_ == Screen::NicknameQuestion || screen_ == Screen::ResetFirst || screen_ == Screen::ResetFinal ||
       screen_ == Screen::ReleaseConfirm) {
     const char* prompt = (screen_ == Screen::NicknameQuestion || screen_ == Screen::ReleaseConfirm) ? message_
-                         : screen_ == Screen::ResetFirst     ? tr(STR_POKEMON_RESET_QUESTION)
-                                                             : tr(STR_POKEMON_RESET_CONFIRM);
+                         : screen_ == Screen::ResetFirst ? tr(STR_POKEMON_RESET_QUESTION)
+                                                         : tr(STR_POKEMON_RESET_CONFIRM);
     centered(renderer, UI_12_FONT_ID, contentTop + 18, prompt, EpdFontFamily::BOLD);
     if (screen_ == Screen::NicknameQuestion) {
       pokemon::drawPokemonSpeciesArt(renderer, nicknamePrompt_.speciesId, true,
@@ -1052,8 +1085,7 @@ void PokemonActivity::renderRowArt() {
                                        rowY + pokemon::pokemonCenteredOffset(rowHeight_, itemSize), itemSize, itemSize},
                                   false);
     } else if (speciesId != 0) {
-      pokemon::drawPokemonSpeciesArt(renderer, speciesId, true,
-                                     Rect{listBounds_.x + 5, rowY + 2, 80, 60});
+      pokemon::drawPokemonSpeciesArt(renderer, speciesId, true, Rect{listBounds_.x + 5, rowY + 2, 80, 60});
     }
   }
 }
@@ -1088,12 +1120,12 @@ void PokemonActivity::renderHeaderAndHints() {
     const int titleY = header.y + std::max(0, header.height - renderer.getLineHeight(UI_12_FONT_ID) - titleRuleGap);
     renderer.drawText(UI_12_FONT_ID, header.x + metrics.headerSidePadding, titleY, title, true, EpdFontFamily::BOLD);
   }
-  const char* confirm = screen_ == Screen::Summary ? tr(STR_POKEMON_ACTIONS)
+  const char* confirm = screen_ == Screen::Summary   ? tr(STR_POKEMON_ACTIONS)
                         : screen_ == Screen::Message ? tr(STR_OK)
                                                      : tr(STR_SELECT);
   const bool hasRows = logicalCount() > 0;
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), confirm, hasRows ? tr(STR_DIR_UP) : "",
-                                            hasRows ? tr(STR_DIR_DOWN) : "");
+  const auto labels =
+      mappedInput.mapLabels(tr(STR_BACK), confirm, hasRows ? tr(STR_DIR_UP) : "", hasRows ? tr(STR_DIR_DOWN) : "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 

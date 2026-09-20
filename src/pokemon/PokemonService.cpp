@@ -296,6 +296,19 @@ ServiceStatus PokemonService::setEvolutionPrompts(const uint32_t recordId, const
   return ServiceStatus::Ok;
 }
 
+ServiceStatus PokemonService::setEncountersEnabled(const bool enabled) {
+  PokemonState state{};
+  const ServiceStatus stateStatus = loadReadyState(state);
+  if (stateStatus != ServiceStatus::Ok) return stateStatus;
+  if (state.encountersEnabled == enabled) return ServiceStatus::Ok;
+  state.encountersEnabled = enabled;
+  if (!store_.commit(state)) {
+    LOG_ERR("PokemonService", "Failed to save encounter preference");
+    return ServiceStatus::StorageError;
+  }
+  return ServiceStatus::Ok;
+}
+
 ServiceStatus PokemonService::useEvolutionItem(const uint32_t recordId, const EvolutionItem item) {
   PokemonState state{};
   const ServiceStatus stateStatus = loadReadyState(state);
