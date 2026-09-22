@@ -20,6 +20,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -39,7 +42,19 @@ import java.net.InetAddress
 import java.io.File
 
 data class ReaderFile(val name: String, val size: Long, val directory: Boolean)
-data class ReaderStatus(val ip: String, val mode: String, val storageTotal: Long, val storageUsed: Long)
+data class ReaderStatus(
+    val ip: String,
+    val mode: String,
+    val version: String,
+    val storageTotal: Long,
+    val storageUsed: Long
+)
+
+data class FirmwareRelease(
+    val version: String,
+    val publishedAt: String,
+    val releaseUrl: String
+)
 
 private fun uniqueFileName(name: String, existing: Set<String>): String {
     if (name !in existing) return name
@@ -60,6 +75,22 @@ private fun formatBytes(bytes: Long): String = when {
 
 private fun isSystemItem(name: String): Boolean =
     name.startsWith(".") || name == "System Volume Information" || name == "XTCache"
+
+private fun versionNumbers(version: String): List<Int> =
+    Regex("\\d+").findAll(version).take(3).map { it.value.toInt() }.toList()
+
+private fun isNewerFirmware(latest: String, current: String): Boolean {
+    val latestNumbers = versionNumbers(latest)
+    val currentNumbers = versionNumbers(current)
+    if (latestNumbers.size < 3 || currentNumbers.size < 3) return latest != current
+    return latestNumbers.zip(currentNumbers).firstOrNull { it.first != it.second }?.let { it.first > it.second } ?: false
+}
+
+private fun isSameFirmwareVersion(latest: String, current: String): Boolean {
+    val latestNumbers = versionNumbers(latest)
+    val currentNumbers = versionNumbers(current)
+    return latestNumbers.size == 3 && latestNumbers == currentNumbers
+}
 
 class ReaderApi(
     private val client: OkHttpClient = OkHttpClient.Builder()
@@ -98,8 +129,37 @@ class ReaderApi(
 
     suspend fun status(baseUrl: String): ReaderStatus = withContext(Dispatchers.IO) {
         val response = client.newCall(Request.Builder().url(baseUrl.trimEnd('/') + "/api/status").build()).execute()
-        response.use { check(it.isSuccessful); val json = org.json.JSONObject(it.body?.string() ?: "{}")
-            ReaderStatus(json.optString("ip"), json.optString("mode"), json.optLong("storageTotal"), json.optLong("storageUsed")) }
+        response.use {
+            check(it.isSuccessful)
+            val json = org.json.JSONObject(it.body?.string() ?: "{}")
+            ReaderStatus(
+                ip = json.optString("ip"),
+                mode = json.optString("mode"),
+                version = json.optString("version"),
+                storageTotal = json.optLong("storageTotal"),
+                storageUsed = json.optLong("storageUsed")
+            )
+        }
+    }
+
+    suspend fun latestFirmware(): FirmwareRelease? = withContext(Dispatchers.IO) {
+        val url = "https://api.github.com/repos/technologicallyme88-ops/PlayCompanion/releases/latest"
+        client.newCall(
+            Request.Builder().url(url).header("Accept", "application/vnd.github+json").build()
+        ).execute().use { response ->
+            if (response.code == 404) return@use null
+            check(response.isSuccessful) { "Release check returned HTTP ${response.code}" }
+            val json = org.json.JSONObject(response.body?.string() ?: "{}")
+            val hasOtaAsset = json.optJSONArray("assets")?.let { assets ->
+                (0 until assets.length()).any { index -> assets.optJSONObject(index)?.optString("name") == "firmware.bin" }
+            } ?: false
+            if (!hasOtaAsset) return@use null
+            FirmwareRelease(
+                version = json.optString("tag_name"),
+                publishedAt = json.optString("published_at"),
+                releaseUrl = json.optString("html_url")
+            )
+        }
     }
 
     suspend fun upload(baseUrl: String, path: String, uri: Uri, resolver: ContentResolver, filename: String, onProgress: (Long, Long) -> Unit, onCall: (Call) -> Unit = {}) = withContext(Dispatchers.IO) {
@@ -192,6 +252,68 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
+private fun FirmwarePage(
+    reader: ReaderStatus?,
+    release: FirmwareRelease?,
+    isChecking: Boolean,
+    message: String,
+    onCheck: () -> Unit
+) {
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Text("Firmware updates", style = MaterialTheme.typography.headlineSmall)
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Reader firmware", style = MaterialTheme.typography.titleMedium)
+                Text(reader?.version?.takeIf { it.isNotBlank() } ?: "Connect your reader on the Files tab first")
+            }
+        }
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Latest PlayCompanion release", style = MaterialTheme.typography.titleMedium)
+                when {
+                    isChecking -> LinearProgressIndicator(Modifier.fillMaxWidth())
+                    release == null -> Text("Tap Check for updates to look for a compatible OTA release.")
+                    else -> {
+                        Text(release.version)
+                        if (release.publishedAt.isNotBlank()) Text("Published ${release.publishedAt.take(10)}", style = MaterialTheme.typography.bodySmall)
+                        val current = reader?.version.orEmpty()
+                        val updateAvailable = current.isNotBlank() && isNewerFirmware(release.version, current)
+                        if (isSameFirmwareVersion(release.version, current)) {
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = androidx.compose.ui.graphics.Color(0xFF1F4D2A)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(Modifier.padding(16.dp)) {
+                                    Text("Firmware is up to date", style = MaterialTheme.typography.titleLarge)
+                                    Text("No update is needed for your reader.")
+                                }
+                            }
+                        } else {
+                            Text(
+                                when {
+                                    current.isBlank() -> "Connect the reader to compare versions."
+                                    updateAvailable -> "An update is available. On the reader, open Settings → System → Check for updates."
+                                    else -> "The reader will make the final compatibility check in Settings → System → Check for updates."
+                                },
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                }
+                Button(onClick = onCheck, enabled = !isChecking, modifier = Modifier.fillMaxWidth()) {
+                    Text("Check for updates")
+                }
+            }
+        }
+        Text(message, style = MaterialTheme.typography.bodySmall)
+        Text(
+            "Updates install directly on the reader after its own confirmation. This app does not upload or flash firmware.",
+            style = MaterialTheme.typography.bodySmall
+        )
+    }
+}
+
+@Composable
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 private fun PlayCompanionApp() {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -214,26 +336,66 @@ private fun PlayCompanionApp() {
     var activeUpload by remember { mutableStateOf<Call?>(null) }
     var status by remember { mutableStateOf<ReaderStatus?>(null) }
     var message by remember { mutableStateOf("Enter the reader address, then tap Connect") }
+    var activeTab by remember { mutableIntStateOf(0) }
+    var firmwareRelease by remember { mutableStateOf<FirmwareRelease?>(null) }
+    var firmwareMessage by remember { mutableStateOf("Check the latest release from GitHub.") }
+    var checkingFirmware by remember { mutableStateOf(false) }
     val api = remember { ReaderApi() }
     val scope = rememberCoroutineScope()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val currentStatus by rememberUpdatedState(status)
+    val currentPath by rememberUpdatedState(path)
 
     fun load(target: String = path) {
-        message = "Connecting…"
+        message = "Checking reader connection…"
+        status = null
         selected = null
         selectedNames.clear()
         scope.launch(Dispatchers.Main) {
-            runCatching { api.status(address) }.onSuccess {
-                status = it
+            runCatching {
+                val readerStatus = api.status(address)
+                val readerFiles = api.list(address, target)
+                readerStatus to readerFiles
+            }.onSuccess { (readerStatus, readerFiles) ->
+                status = readerStatus
                 preferences.edit { putString("reader_address", address); putBoolean("auto_connect", true) }
+                files = readerFiles
+                path = target
+                message = "${readerFiles.size} items"
             }
-            runCatching { api.list(address, target) }
-                .onSuccess { files = it; path = target; message = "${it.size} items" }
-                .onFailure { message = it.message ?: "Connection failed" }
+                .onFailure {
+                    status = null
+                    message = it.message ?: "Reader is unavailable"
+                }
+        }
+    }
+
+    fun checkFirmware() {
+        checkingFirmware = true
+        firmwareMessage = "Checking GitHub releases…"
+        scope.launch {
+            runCatching { api.latestFirmware() }
+                .onSuccess {
+                    firmwareRelease = it
+                    firmwareMessage = if (it == null) "No compatible firmware.bin asset is published in the latest release." else "Latest compatible release found."
+                }
+                .onFailure { firmwareMessage = it.message ?: "Could not check for updates" }
+            checkingFirmware = false
         }
     }
 
     LaunchedEffect(Unit) {
         if (preferences.getBoolean("auto_connect", false)) load("/")
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && currentStatus != null && preferences.getBoolean("auto_connect", false)) {
+                load(currentPath)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     LaunchedEffect(showMovePicker, moveDestination) {
@@ -322,7 +484,7 @@ private fun PlayCompanionApp() {
                 )
             },
             floatingActionButton = {
-                Box {
+                if (activeTab == 0) Box {
                     Surface(
                         modifier = Modifier.size(56.dp).combinedClickable(
                             onClick = { picker.launch(arrayOf("application/epub+zip", "application/octet-stream")) },
@@ -346,10 +508,18 @@ private fun PlayCompanionApp() {
                         )
                     }
                 }
-            }
+            },
         ) { padding ->
             Column(Modifier.padding(padding).padding(16.dp).fillMaxSize()) {
-                if (status == null) {
+                TabRow(selectedTabIndex = activeTab) {
+                    Tab(selected = activeTab == 0, onClick = { activeTab = 0 }, text = { Text("Files") })
+                    Tab(selected = activeTab == 1, onClick = { activeTab = 1 }, text = { Text("Firmware") })
+                }
+                Spacer(Modifier.height(16.dp))
+                if (activeTab == 1) {
+                    FirmwarePage(status, firmwareRelease, checkingFirmware, firmwareMessage, ::checkFirmware)
+                } else {
+                    if (status == null) {
                     OutlinedTextField(
                         address,
                         { address = it; preferences.edit { putString("reader_address", it) } },
@@ -480,6 +650,7 @@ private fun PlayCompanionApp() {
                         HorizontalDivider()
                     }
                 }
+                    }
             }
         }
     }

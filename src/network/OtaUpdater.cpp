@@ -25,7 +25,8 @@ namespace {
 // the X4 and X3, which are ESP32-C3; the only device this fork builds for is
 // the X4 Pro, which is an S3. Upstream added a guard against exactly that
 // (crosspoint-reader#2880), which says how it ends without one.
-constexpr char latestReleaseUrl[] = "https://api.github.com/repos/ma-r-s/crossplay/releases/latest";
+constexpr char latestReleaseUrl[] =
+    "https://api.github.com/repos/technologicallyme88-ops/PlayCompanion/releases/latest";
 }  // namespace
 
 OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
