@@ -36,15 +36,15 @@
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "activities/settings/TextSettingsActivity.h"
-#include "components/UITheme.h"
 #include "companion/CompanionTracker.h"
+#include "components/UITheme.h"
 #if defined(CROSSINK_ENABLE_POKEMON)
 #include "pokemon/PokemonService.h"
 #endif
+#include "apps_local/journal/ReadingJournal.h"
 #include "fontIds.h"
 #include "util/BookmarkUtil.h"
 #include "util/ScreenshotUtil.h"
-#include "apps_local/journal/ReadingJournal.h"
 
 namespace {
 constexpr int PAGE_TURN_RATES[] = {1, 1, 3, 6, 12};
@@ -161,7 +161,6 @@ void moveFinishedBookToReadFolder(const std::string& srcPath, const std::string&
 
 }  // namespace
 
-
 #if defined(CROSSINK_ENABLE_POKEMON)
 namespace {
 bool pokemonEncounterPendingNow() {
@@ -193,8 +192,7 @@ void drawReaderEncounterBadge(const GfxRenderer& renderer, const CrossPointSetti
   char progressText[48]{};
   if (sb.showChapterPageCount && sb.showBookProgressPercent) {
     const int roundedProgress = static_cast<int>(bookProgress + 0.5f);
-    snprintf(progressText, sizeof(progressText), "%d/%d %d%%",
-             currentPage, pageCount, roundedProgress);
+    snprintf(progressText, sizeof(progressText), "%d/%d %d%%", currentPage, pageCount, roundedProgress);
   } else if (sb.showChapterPageCount) {
     snprintf(progressText, sizeof(progressText), "%d/%d", currentPage, pageCount);
   }
@@ -352,7 +350,8 @@ void EpubReaderActivity::showBuildPopup(GfxRenderer& renderer, int& pagesUntilFu
   buildPopupPending = false;
 }
 
-void EpubReaderActivity::openDictionaryWordSelect() {
+void EpubReaderActivity::openDictionaryWordSelect(const int initialTouchX, const int initialTouchY,
+                                                  const bool lookupInitialTouch) {
   if (SETTINGS.dictionaryName[0] == '\0') {
     showDictionaryMessage = true;
     dictionaryMessageTime = millis();
@@ -369,8 +368,9 @@ void EpubReaderActivity::openDictionaryWordSelect() {
   orientedMarginTop += SETTINGS.screenMargin;
   orientedMarginLeft += SETTINGS.screenMargin;
 
-  startActivityForResult(std::make_unique<DictionaryWordSelectActivity>(renderer, mappedInput, std::move(page),
-                                                                        orientedMarginLeft, orientedMarginTop),
+  startActivityForResult(std::make_unique<DictionaryWordSelectActivity>(
+                             renderer, mappedInput, std::move(page), orientedMarginLeft, orientedMarginTop,
+                             initialTouchX, initialTouchY, lookupInitialTouch),
                          [this](const ActivityResult&) { requestUpdate(); });
 }
 
@@ -395,8 +395,7 @@ void EpubReaderActivity::loop() {
   // Poll the persisted event queue at a low rate instead of touching the SD on
   // every render/page turn. Encounter generation itself is checkpoint-driven,
   // so at most ~30 seconds of notification latency is expected.
-  if (lastPokemonEncounterPollMs == 0 ||
-      static_cast<uint32_t>(pokemonNowMs - lastPokemonEncounterPollMs) >= 30000UL) {
+  if (lastPokemonEncounterPollMs == 0 || static_cast<uint32_t>(pokemonNowMs - lastPokemonEncounterPollMs) >= 30000UL) {
     lastPokemonEncounterPollMs = pokemonNowMs;
     const bool pending = pokemonEncounterPendingNow();
     if (pending != pokemonEncounterPending) {
@@ -515,6 +514,18 @@ void EpubReaderActivity::loop() {
     showDictionaryMessage = false;
     requestUpdate();
   }
+
+#if FREEINK_DEVICE_X4PRO
+  // The X4 Pro's touch classifier delivers this while the contact is still
+  // down and suppresses its release, so the lookup cannot also turn a page.
+  // Keep the reader's touch-controls opt-out authoritative.
+  int longPressX = 0;
+  int longPressY = 0;
+  if (SETTINGS.touchReaderControls && mappedInput.wasScreenLongPress(longPressX, longPressY)) {
+    openDictionaryWordSelect(longPressX, longPressY, true);
+    return;
+  }
+#endif
 
   const bool confirmReleased = mappedInput.wasReleased(MappedInputManager::Button::Confirm);
   if (confirmReleased) {
@@ -885,6 +896,14 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
     }
     case EpubReaderMenuActivity::MenuAction::DICTIONARY: {
       openDictionaryWordSelect();
+      break;
+    }
+    case EpubReaderMenuActivity::MenuAction::MARK_FINISHED: {
+      if (epub) {
+        journalFinishRecorded = journal::noteFinished(epub->getPath().c_str());
+        if (!journalFinishRecorded) LOG_ERR("ERS", "Could not record journal finish");
+      }
+      openReaderMenu();
       break;
     }
     case EpubReaderMenuActivity::MenuAction::DISPLAY_QR: {

@@ -41,6 +41,8 @@ class ReadingJournalActivity final : public Activity {
   int editMonth = 1;
   int editDay = 1;
   Rect bookCardRect{};
+  Rect calendarGridRect{};
+  int calendarFirstEntry = 0;
   Rect summaryRowsRect{};
   Rect dateGridRect{};
   Rect dateCancelRect{};

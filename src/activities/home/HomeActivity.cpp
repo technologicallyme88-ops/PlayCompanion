@@ -8,6 +8,7 @@
 #include <I18n.h>
 #if defined(CROSSINK_ENABLE_POKEMON)
 #include <Memory.h>
+
 #include "activities/pokemon/PokemonActivity.h"
 #include "pokemon/PokemonCompanionBridge.h"
 #include "pokemon/PokemonCompanionDialogue.h"
@@ -23,12 +24,12 @@
 #include <vector>
 
 #include "../../apps_local/Shelf.h"  // CrossPlay game/app shelf
-
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "MappedInputManager.h"
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
+#include "activities/util/ConfirmationActivity.h"
 #include "companion/CompanionRenderer.h"
 #include "companion/CompanionState.h"
 #include "companion/CompanionTracker.h"
@@ -62,10 +63,9 @@ void drawPokemonEncounterIndicator(const GfxRenderer& renderer, const Rect& head
   constexpr int GAP = 6;
   constexpr int BATTERY_NUB = 2;
   constexpr int PERCENT_GAP = 6;
-  const int percentReserve =
-      SETTINGS.hideBatteryPercentage == CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS
-          ? 0
-          : PERCENT_GAP + renderer.getTextWidth(SMALL_FONT_ID, "100%");
+  const int percentReserve = SETTINGS.hideBatteryPercentage == CrossPointSettings::HIDE_BATTERY_PERCENTAGE::HIDE_ALWAYS
+                                 ? 0
+                                 : PERCENT_GAP + renderer.getTextWidth(SMALL_FONT_ID, "100%");
   const int batteryReserve = metrics.batteryWidth + BATTERY_NUB + percentReserve;
 
   const bool batteryLeft = metrics.headerBatterySide == 1;
@@ -540,7 +540,8 @@ void HomeActivity::drawCompanion(const Rect region) const {
   maxLines = std::max(1, (maxBubbleH - BUBBLE_PAD * 2 - pagerH) / lineH);
   const auto page = companionPageSlice(lines, maxLines, companionMessagePage);
   companionMessagePages = page.pages;
-  const int bubbleH = page.count * lineH + BUBBLE_PAD * 2 + (page.pages > 1 ? renderer.getLineHeight(SMALL_FONT_ID) + 2 : 0);
+  const int bubbleH =
+      page.count * lineH + BUBBLE_PAD * 2 + (page.pages > 1 ? renderer.getLineHeight(SMALL_FONT_ID) + 2 : 0);
   const int bubbleY = blockTop + (artHeight - bubbleH) / 2;
 
   companion::drawSpeechBubble(renderer, bubbleX, bubbleY, bubbleW, bubbleH, TAIL_LENGTH);
@@ -651,8 +652,8 @@ void HomeActivity::drawCompanionCompact(const int stripTop, const int available,
   maxLines = std::max(1, (usableH - PAD * 2 - pagerH) / lineH);
   const auto page = companionPageSlice(lines, maxLines, companionMessagePage);
   companionMessagePages = page.pages;
-  const int bubbleH = std::min(usableH, page.count * lineH + PAD * 2 +
-                                          (page.pages > 1 ? renderer.getLineHeight(SMALL_FONT_ID) + 1 : 0));
+  const int bubbleH = std::min(
+      usableH, page.count * lineH + PAD * 2 + (page.pages > 1 ? renderer.getLineHeight(SMALL_FONT_ID) + 1 : 0));
   const int bubbleY = stripTop + (available - bubbleH) / 2;
   companion::drawSpeechBubble(renderer, bubbleX, bubbleY, bubbleW, bubbleH, TAIL_LENGTH);
 
@@ -795,6 +796,30 @@ void HomeActivity::loop() {
   const int coverColumnCount = std::max(1, metrics.homeRecentBooksCount);
   const int recentCount = std::min(static_cast<int>(recentBooks.size()), coverColumnCount);
   const int coverColumnWidth = (renderer.getScreenWidth() - 2 * metrics.contentSidePadding) / coverColumnCount;
+#if FREEINK_DEVICE_X4PRO
+  int heldBookX = 0;
+  int heldBookY = 0;
+  if (mappedInput.wasScreenLongPress(heldBookX, heldBookY)) {
+    const int heldBook = (heldBookX - metrics.contentSidePadding) / coverColumnWidth;
+    if (heldBookX >= metrics.contentSidePadding &&
+        heldBookX < metrics.contentSidePadding + recentCount * coverColumnWidth && heldBook >= 0 &&
+        heldBook < recentCount && heldBookY >= metrics.homeTopPadding &&
+        heldBookY < metrics.homeTopPadding + metrics.homeCoverTileHeight) {
+      const std::string path = recentBooks[heldBook].path;
+      const std::string title = recentBooks[heldBook].title;
+      startActivityForResult(
+          std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_REMOVE_FROM_RECENTS), title),
+          [this, path, coverColumnCount](const ActivityResult& result) {
+            if (!result.isCancelled && RECENT_BOOKS.removeByPath(path)) {
+              loadRecentBooks(coverColumnCount);
+              selectorIndex = 0;
+              requestUpdate(true);
+            }
+          });
+      return;
+    }
+  }
+#endif
   int touchedBook = -1;
   const auto coverTouch = mappedInput.colTouch(touchedBook, metrics.contentSidePadding, coverColumnWidth, recentCount,
                                                metrics.homeTopPadding,
@@ -887,8 +912,8 @@ void HomeActivity::render(RenderLock&&) {
 
 #if defined(CROSSINK_ENABLE_POKEMON)
   if (pokemonEncounterPending) {
-    drawPokemonEncounterIndicator(
-        renderer, Rect{0, metrics.topPadding, pageWidth, metrics.homeTopPadding - metrics.topPadding});
+    drawPokemonEncounterIndicator(renderer,
+                                  Rect{0, metrics.topPadding, pageWidth, metrics.homeTopPadding - metrics.topPadding});
   }
 #endif
 
@@ -977,9 +1002,10 @@ void HomeActivity::render(RenderLock&&) {
     while (pageItems > 1 && GUI.getMenuContentHeight(renderer, measureRect, pageItems) > menuRect.height) --pageItems;
     const int start = (std::max(0, renderedSelection) / pageItems) * pageItems;
     const int count = std::min(pageItems, static_cast<int>(menuItems.size()) - start);
-    GUI.drawButtonMenu(renderer, menuRect, count, renderedSelection < 0 ? -1 : renderedSelection - start,
-                       [&labelAt, start](int index) { return labelAt(start + index); },
-                       [&menuIcons, start](int index) { return menuIcons[start + index]; });
+    GUI.drawButtonMenu(
+        renderer, menuRect, count, renderedSelection < 0 ? -1 : renderedSelection - start,
+        [&labelAt, start](int index) { return labelAt(start + index); },
+        [&menuIcons, start](int index) { return menuIcons[start + index]; });
   } else {
     GUI.drawButtonMenu(renderer, menuRect, static_cast<int>(menuItems.size()), renderedSelection, labelAt,
                        [&menuIcons](int index) { return menuIcons[index]; });
@@ -1001,8 +1027,9 @@ void HomeActivity::render(RenderLock&&) {
                      GUI.getMenuRowHeight(renderer)};
     const int pokemonMenuIndex = upstreamMenuRows() + homeShelfFolderCount();
     const int pokemonSelectorIndex = static_cast<int>(recentBooks.size()) + pokemonMenuIndex;
-    GUI.drawButtonMenu(renderer, pokemonRect, 1, selectorIndex == pokemonSelectorIndex ? 0 : -1,
-                       [](int) { return std::string(tr(STR_POKEMON)); }, [](int) { return Pokemon; });
+    GUI.drawButtonMenu(
+        renderer, pokemonRect, 1, selectorIndex == pokemonSelectorIndex ? 0 : -1,
+        [](int) { return std::string(tr(STR_POKEMON)); }, [](int) { return Pokemon; });
   }
 #endif
 
@@ -1049,7 +1076,6 @@ void HomeActivity::onFileBrowserOpen() { activityManager.goToFileBrowser(); }
 void HomeActivity::onJournalOpen() { shelf::openItemFromHome(1, 0, renderer, mappedInput); }
 
 void HomeActivity::onSettingsOpen() { activityManager.goToSettings(); }
-
 
 #if defined(CROSSINK_ENABLE_POKEMON)
 void HomeActivity::onPokemonOpen() {
@@ -1102,8 +1128,8 @@ void HomeActivity::drawCompanionColumn(const Rect region, const char* label, con
   // normal-font lines would crowd the column, use the small UI font rather than
   // allowing the renderer to turn the last line into "...".
   int quoteFont = UI_10_FONT_ID;
-  std::vector<std::string> lines = quote ? wrapCompanionText(renderer, quoteFont, quote, textW)
-                                         : std::vector<std::string>{};
+  std::vector<std::string> lines =
+      quote ? wrapCompanionText(renderer, quoteFont, quote, textW) : std::vector<std::string>{};
   int lineH = renderer.getLineHeight(quoteFont);
   if (lines.size() > 3) {
     quoteFont = SMALL_FONT_ID;
@@ -1121,8 +1147,10 @@ void HomeActivity::drawCompanionColumn(const Rect region, const char* label, con
   int scale = 0;
   const int maxScale = useInkBounds ? MAX_NOODLE_SCALE : MAX_SCALE;
   for (int candidate = maxScale; candidate >= 1; candidate--) {
-    const int candidateW = useInkBounds ? companion::poseInkWidth(id, mood, candidate) : companion::poseWidth(candidate);
-    const int candidateH = useInkBounds ? companion::poseInkHeight(id, mood, candidate) : companion::poseHeight(candidate);
+    const int candidateW =
+        useInkBounds ? companion::poseInkWidth(id, mood, candidate) : companion::poseWidth(candidate);
+    const int candidateH =
+        useInkBounds ? companion::poseInkHeight(id, mood, candidate) : companion::poseHeight(candidate);
     if (candidateW + WALK_TRAVEL > colW) continue;
     if (bubbleBlock + candidateH + BOB_HEIGHT + statusBlock <= colH) {
       scale = candidate;

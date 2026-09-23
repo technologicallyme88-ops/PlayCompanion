@@ -48,6 +48,16 @@ void DictionaryWordSelectActivity::onEnter() {
   // full-repaint path as the fallback.
   snapshot = makeUniqueNoThrow<uint8_t[]>(SNAPSHOT_CAPACITY);
   extractWords();
+  if (initialTouchX >= 0 && initialTouchY >= 0) {
+    const int initial = wordAt(initialTouchX, initialTouchY);
+    if (initial >= 0) {
+      selected = initial;
+      if (lookupInitialTouch) {
+        performLookup();
+        return;
+      }
+    }
+  }
   // Start on the middle row's word nearest mid-screen instead of top-left:
   // any word on the page is then at most half a page of moves away.
   if (!words.empty()) {

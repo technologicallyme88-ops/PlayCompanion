@@ -80,6 +80,7 @@ class PokemonActivity final : public Activity {
   Screen screen_ = Screen::Menu;
   Screen returnScreen_ = Screen::Menu;
   Screen actionSource_ = Screen::Party;
+  int actionSourceSelection_ = 0;
   int selected_ = 0;
   int rowCount_ = 0;
   uint16_t starterSpecies_ = 1;

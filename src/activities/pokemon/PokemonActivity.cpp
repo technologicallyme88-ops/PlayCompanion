@@ -325,6 +325,7 @@ void PokemonActivity::activate() {
       if (recordId == 0) return;
       focusedRecordId_ = recordId;
       actionSource_ = screen_;
+      actionSourceSelection_ = selected_;
       setScreen(Screen::Summary);
       return;
     }
@@ -524,7 +525,7 @@ void PokemonActivity::goBack() {
       return;
     case Screen::Summary:
     case Screen::Actions:
-      setScreen(actionSource_);
+      setScreen(actionSource_, actionSourceSelection_);
       return;
     case Screen::ReleaseConfirm:
       setScreen(Screen::Actions);
@@ -575,6 +576,21 @@ void PokemonActivity::loop() {
     }
   }
 
+#if FREEINK_DEVICE_X4PRO
+  // Only the Pro has touch: a vertical PC-box swipe moves by one visible page.
+  if (screen_ == Screen::Pc) {
+    const auto swipe = mappedInput.wasSwipe();
+    if (swipe == MappedInputManager::SwipeDir::Up || swipe == MappedInputManager::SwipeDir::Down) {
+      const int count = logicalCount();
+      const int jump = std::max(1, rowsPerPage());
+      selected_ = swipe == MappedInputManager::SwipeDir::Up ? std::min(count - 1, selected_ + jump)
+                                                            : std::max(0, selected_ - jump);
+      requestUpdate();
+      return;
+    }
+  }
+#endif
+
   // Party: holding a populated row opens its action menu directly. This makes
   // Move visible without first opening Summary. Move already uses
   // PokemonService::movePartyMember(), and moving a Pokemon to slot 1 makes it
@@ -591,6 +607,7 @@ void PokemonActivity::loop() {
           selected_ = index;
           focusedRecordId_ = snapshot_.party[index].recordId;
           actionSource_ = Screen::Party;
+          actionSourceSelection_ = selected_;
           setScreen(Screen::Actions);
           return;
         }
@@ -614,6 +631,7 @@ void PokemonActivity::loop() {
             selected_ = pageStart() + local;
             focusedRecordId_ = recordId;
             actionSource_ = Screen::Pc;
+            actionSourceSelection_ = selected_;
             setScreen(Screen::Actions);
             return;
           }
@@ -626,7 +644,8 @@ void PokemonActivity::loop() {
   // generic list router also makes every other part of the encounter inert.
   if (screen_ == Screen::Event) {
     const pokemon::PendingEvent* pending = pokemon::pendingEventFront(snapshot_.state);
-    if (pending != nullptr && pending->kind == pokemon::PendingEventKind::Encounter) {
+    if (pending != nullptr && (pending->kind == pokemon::PendingEventKind::Encounter ||
+                               pending->kind == pokemon::PendingEventKind::Evolution)) {
       int row = -1;
       const auto touch = mappedInput.rowTouch(row, listBounds_.y, rowHeight_, rowCount_, listBounds_.x,
                                               listBounds_.x + listBounds_.width, rowHeight_);

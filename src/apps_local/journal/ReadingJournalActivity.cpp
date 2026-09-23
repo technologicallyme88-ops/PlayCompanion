@@ -1,9 +1,9 @@
 #include "ReadingJournalActivity.h"
 
-#include <Memory.h>
-#include <Logging.h>
 #include <Bitmap.h>
 #include <HalStorage.h>
+#include <Logging.h>
+#include <Memory.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -11,8 +11,8 @@
 #include <cstring>
 #include <ctime>
 
-#include "../../components/UITheme.h"
 #include "../../RecentBooksStore.h"
+#include "../../components/UITheme.h"
 #include "../Shelf.h"
 #include "../ui/ToyboxFonts.h"
 #include "fontIds.h"
@@ -29,7 +29,7 @@ void formatStamp(const uint32_t epoch, char* out, const size_t cap) {
     return;
   }
   const time_t raw = static_cast<time_t>(epoch);
-  struct tm parts {};
+  struct tm parts{};
   localtime_r(&raw, &parts);
   std::snprintf(out, cap, "%d %s %d  %02d:%02d", parts.tm_mday, kMonths[parts.tm_mon], parts.tm_year + 1900,
                 parts.tm_hour, parts.tm_min);
@@ -48,8 +48,8 @@ void drawStar(const GfxRenderer& renderer, const int cx, const int cy, const int
   if (filled) {
     for (int r = 2; r < radius - 2; r += 2) {
       for (int i = 0; i < 10; ++i) {
-        renderer.drawLine(cx + px[i] * r / 100, cy + py[i] * r / 100,
-                          cx + px[(i + 1) % 10] * r / 100, cy + py[(i + 1) % 10] * r / 100, true);
+        renderer.drawLine(cx + px[i] * r / 100, cy + py[i] * r / 100, cx + px[(i + 1) % 10] * r / 100,
+                          cy + py[(i + 1) % 10] * r / 100, true);
       }
     }
   }
@@ -93,8 +93,8 @@ void ReadingJournalActivity::onEnter() {
     year = static_cast<int>(currentDate / 10000);
     month = static_cast<int>((currentDate / 100) % 100);
   } else if (selected >= 0) {
-    const uint32_t date = journal::dateKey(entries[selected].finishedAt ? entries[selected].finishedAt
-                                                                       : entries[selected].startedAt);
+    const uint32_t date =
+        journal::dateKey(entries[selected].finishedAt ? entries[selected].finishedAt : entries[selected].startedAt);
     year = static_cast<int>(date / 10000);
     month = static_cast<int>((date / 100) % 100);
   }
@@ -120,8 +120,8 @@ void ReadingJournalActivity::stepMonth(const int delta) {
 void ReadingJournalActivity::selectNext(const int delta) {
   if (count <= 0) return;
   selected = (selected + delta + count) % count;
-  const uint32_t date = journal::dateKey(entries[selected].finishedAt ? entries[selected].finishedAt
-                                                                     : entries[selected].startedAt);
+  const uint32_t date =
+      journal::dateKey(entries[selected].finishedAt ? entries[selected].finishedAt : entries[selected].startedAt);
   if (date) {
     year = static_cast<int>(date / 10000);
     month = static_cast<int>((date / 100) % 100);
@@ -149,8 +149,10 @@ bool ReadingJournalActivity::saveDateEdit() {
     return false;
   }
   const uint32_t epoch = journal::epochForDate(editYear, editMonth, editDay);
-  if (editingFinish) entries[selected].finishedAt = epoch;
-  else entries[selected].startedAt = epoch;
+  if (editingFinish)
+    entries[selected].finishedAt = epoch;
+  else
+    entries[selected].startedAt = epoch;
   return true;
 }
 
@@ -191,25 +193,58 @@ void ReadingJournalActivity::loop() {
     return;
   }
   if (view == View::Calendar) {
-    int touched = -1;
-    const auto cardTouch = mappedInput.rowTouch(touched, bookCardRect.y, bookCardRect.height, selected >= 0 ? 1 : 0,
-                                                bookCardRect.x, bookCardRect.x + bookCardRect.width,
-                                                bookCardRect.height);
-    if (cardTouch == MappedInputManager::RowTouch::Tap && selected >= 0) {
-      summaryField = 0;
-      view = View::Summary;
-      requestUpdate();
-      return;
+    int tapX = 0;
+    int tapY = 0;
+    if (mappedInput.wasScreenTapped(tapX, tapY)) {
+      if (tapX >= calendarGridRect.x && tapX < calendarGridRect.x + calendarGridRect.width &&
+          tapY >= calendarGridRect.y && tapY < calendarGridRect.y + calendarGridRect.height) {
+        const int cellW = calendarGridRect.width / 7;
+        const int cellH = calendarGridRect.height / 6;
+        const int slot = ((tapY - calendarGridRect.y) / cellH) * 7 + (tapX - calendarGridRect.x) / cellW;
+        const int day = slot - journal::weekday(year, month, 1) + 1;
+        if (day >= 1 && day <= journal::daysInMonth(year, month)) {
+          const uint32_t date = static_cast<uint32_t>(year * 10000 + month * 100 + day);
+          for (int i = count - 1; i >= 0; --i) {
+            if (journal::dateKey(entries[i].startedAt) == date || journal::dateKey(entries[i].finishedAt) == date) {
+              selected = i;
+              summaryField = 0;
+              view = View::Summary;
+              requestUpdate();
+              return;
+            }
+          }
+        }
+      } else if (tapX >= bookCardRect.x && tapX < bookCardRect.x + bookCardRect.width && tapY >= bookCardRect.y &&
+                 tapY < bookCardRect.y + bookCardRect.height) {
+        constexpr int ROW_HEIGHT = 54;
+        const int touched = (tapY - bookCardRect.y) / ROW_HEIGHT;
+        const int index = calendarFirstEntry + touched;
+        if (index >= calendarFirstEntry && index < count) {
+          selected = index;
+          summaryField = 0;
+          view = View::Summary;
+          requestUpdate();
+          return;
+        }
+      }
     }
-    if (mappedInput.wasReleased(MappedInputManager::Button::Left)) stepMonth(-1);
-    else if (mappedInput.wasReleased(MappedInputManager::Button::Right)) stepMonth(1);
-    else if (mappedInput.wasReleased(MappedInputManager::Button::Up)) selectNext(-1);
-    else if (mappedInput.wasReleased(MappedInputManager::Button::Down)) selectNext(1);
+    if (mappedInput.wasReleased(MappedInputManager::Button::PageBack))
+      stepMonth(-1);
+    else if (mappedInput.wasReleased(MappedInputManager::Button::PageForward))
+      stepMonth(1);
+    else if (mappedInput.wasReleased(MappedInputManager::Button::Left))
+      stepMonth(-1);
+    else if (mappedInput.wasReleased(MappedInputManager::Button::Right))
+      stepMonth(1);
+    else if (mappedInput.wasReleased(MappedInputManager::Button::Up))
+      selectNext(-1);
+    else if (mappedInput.wasReleased(MappedInputManager::Button::Down))
+      selectNext(1);
     else if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) && selected >= 0) {
       summaryField = 0;
       view = View::Summary;
-    }
-    else return;
+    } else
+      return;
   } else if (view == View::Summary) {
     journal::Entry& entry = entries[selected];
     int touched = -1;
@@ -244,9 +279,12 @@ void ReadingJournalActivity::loop() {
     }
     if (summaryField != 2 || entry.finishedAt == 0) return;
     uint8_t next = entry.rating;
-    if (mappedInput.wasReleased(MappedInputManager::Button::Left) && next > 0) --next;
-    else if (mappedInput.wasReleased(MappedInputManager::Button::Right) && next < 5) ++next;
-    else return;
+    if (mappedInput.wasReleased(MappedInputManager::Button::Left) && next > 0)
+      --next;
+    else if (mappedInput.wasReleased(MappedInputManager::Button::Right) && next < 5)
+      ++next;
+    else
+      return;
     if (next != entry.rating && journal::setRating(entry.path, next)) entry.rating = next;
   } else {
     int tapX = 0;
@@ -270,19 +308,28 @@ void ReadingJournalActivity::loop() {
       const int cellH = dateGridRect.height / 6;
       const int slot = ((tapY - dateGridRect.y) / cellH) * 7 + (tapX - dateGridRect.x) / cellW;
       const int tappedDay = slot - journal::weekday(editYear, editMonth, 1) + 1;
-      if (tappedDay >= 1 && tappedDay <= journal::daysInMonth(editYear, editMonth)) editDay = tappedDay;
-      else return;
+      if (tappedDay >= 1 && tappedDay <= journal::daysInMonth(editYear, editMonth))
+        editDay = tappedDay;
+      else
+        return;
     } else {
       const auto swipe = mappedInput.wasSwipe();
-      if (swipe == MappedInputManager::SwipeDir::Left) stepEditDay(1);
-      else if (swipe == MappedInputManager::SwipeDir::Right) stepEditDay(-1);
-      else if (mappedInput.wasReleased(MappedInputManager::Button::Left)) stepEditDay(-1);
-    else if (mappedInput.wasReleased(MappedInputManager::Button::Right)) stepEditDay(1);
-    else if (mappedInput.wasReleased(MappedInputManager::Button::Up)) stepEditMonth(-1);
-    else if (mappedInput.wasReleased(MappedInputManager::Button::Down)) stepEditMonth(1);
-    else if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-      if (saveDateEdit()) view = View::Summary;
-    } else return;
+      if (swipe == MappedInputManager::SwipeDir::Left)
+        stepEditDay(1);
+      else if (swipe == MappedInputManager::SwipeDir::Right)
+        stepEditDay(-1);
+      else if (mappedInput.wasReleased(MappedInputManager::Button::Left))
+        stepEditDay(-1);
+      else if (mappedInput.wasReleased(MappedInputManager::Button::Right))
+        stepEditDay(1);
+      else if (mappedInput.wasReleased(MappedInputManager::Button::Up))
+        stepEditMonth(-1);
+      else if (mappedInput.wasReleased(MappedInputManager::Button::Down))
+        stepEditMonth(1);
+      else if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+        if (saveDateEdit()) view = View::Summary;
+      } else
+        return;
     }
   }
   requestUpdate();
@@ -299,8 +346,8 @@ void ReadingJournalActivity::drawCalendar() {
   std::snprintf(heading, sizeof(heading), "%s %d", kMonths[month - 1], year);
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, sw, metrics.headerHeight}, heading);
   for (int col = 0; col < 7; ++col) {
-    UITheme::drawCenteredText(renderer, Rect{side + col * cellW, top, cellW, 24}, UI_10_FONT_ID, top, kWeek[col],
-                              true, EpdFontFamily::BOLD);
+    UITheme::drawCenteredText(renderer, Rect{side + col * cellW, top, cellW, 24}, UI_10_FONT_ID, top, kWeek[col], true,
+                              EpdFontFamily::BOLD);
   }
   const int first = journal::weekday(year, month, 1);
   const int days = journal::daysInMonth(year, month);
@@ -323,14 +370,23 @@ void ReadingJournalActivity::drawCalendar() {
     if (start) renderer.drawRoundedRect(x + cellW / 2 - (finish ? 12 : 4), y + 31, 8, 8, 2, 4, true);
     if (finish) renderer.fillRoundedRect(x + cellW / 2 + (start ? 4 : -4), y + 31, 8, 8, 4, Black);
   }
+  calendarGridRect = Rect{side, top + 32, cellW * 7, cellH * 6};
   const int cardY = top + 32 + 6 * cellH + 12;
-  bookCardRect = Rect{side, cardY - 12, sw - side * 2, 82};
-  if (selected >= 0) {
-    const auto& entry = entries[selected];
-    renderer.drawRoundedRect(bookCardRect.x, bookCardRect.y, bookCardRect.width, bookCardRect.height, 8, 2, true);
-    renderer.drawText(UI_12_FONT_ID, side, cardY, entry.title, true, EpdFontFamily::BOLD);
-    renderer.drawText(UI_10_FONT_ID, side, cardY + 36,
-                      entry.finishedAt ? "FINISHED  •  DETAILS" : "READING  •  DETAILS");
+  const int lastFirstEntry = std::max(0, count - 3);
+  calendarFirstEntry = std::clamp(selected - 1, 0, lastFirstEntry);
+  const int visibleRows = std::min(3, count - calendarFirstEntry);
+  bookCardRect = Rect{side, cardY - 12, sw - side * 2, visibleRows * 54};
+  if (visibleRows > 0) {
+    for (int row = 0; row < visibleRows; ++row) {
+      const int index = calendarFirstEntry + row;
+      const int rowY = cardY + row * 54;
+      const auto& entry = entries[index];
+      if (index == selected) renderer.drawRoundedRect(side, rowY - 12, sw - side * 2, 48, 8, 2, true);
+      UITheme::drawCenteredWrappedText(renderer, Rect{side + 12, rowY - 4, sw - side * 2 - 24, 25}, UI_10_FONT_ID,
+                                       entry.title, 1, index == selected, EpdFontFamily::BOLD);
+      renderer.drawText(UI_10_FONT_ID, side + 12, rowY + 27,
+                        entry.finishedAt ? "FINISHED  •  DETAILS" : "READING  •  DETAILS");
+    }
   } else {
     UITheme::drawCenteredText(renderer, Rect{side, cardY, sw - side * 2, 80}, UI_12_FONT_ID, cardY,
                               "OPEN A BOOK TO BEGIN YOUR JOURNAL");
@@ -368,8 +424,8 @@ void ReadingJournalActivity::drawSummary() {
   }
   const int textX = side + coverW + 18;
   const int textW = sw - side - textX;
-  UITheme::drawCenteredWrappedText(renderer, Rect{textX, heroY + 15, textW, 92}, UI_12_FONT_ID, entry.title, 3,
-                                   true, EpdFontFamily::BOLD);
+  UITheme::drawCenteredWrappedText(renderer, Rect{textX, heroY + 15, textW, 92}, UI_12_FONT_ID, entry.title, 3, true,
+                                   EpdFontFamily::BOLD);
   UITheme::drawCenteredWrappedText(renderer, Rect{textX, heroY + 112, textW, 58}, UI_10_FONT_ID,
                                    entry.author[0] ? entry.author : "UNKNOWN AUTHOR", 2);
   int y = heroY + coverH + 30;
@@ -387,8 +443,7 @@ void ReadingJournalActivity::drawSummary() {
   y += 85;
   if (summaryField == 2) renderer.drawRoundedRect(side - 8, y - 12, sw - side * 2 + 16, 92, 7, 2, true);
   UITheme::drawCenteredText(renderer, Rect{side, y, sw - side * 2, 30}, UI_10_FONT_ID, y,
-                            entry.finishedAt ? "YOUR RATING" : "RATE WHEN FINISHED", true,
-                            EpdFontFamily::BOLD);
+                            entry.finishedAt ? "YOUR RATING" : "RATE WHEN FINISHED", true, EpdFontFamily::BOLD);
   for (int i = 0; i < 5; ++i) drawStar(renderer, sw / 2 - 104 + i * 52, y + 48, 20, i < entry.rating);
   const auto labels = mappedInput.mapLabels("Calendar", "Select", "Field", summaryField == 2 ? "Rating" : "Date");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
@@ -412,8 +467,8 @@ void ReadingJournalActivity::drawDateEditor() {
   const int gridY = top + 105;
   dateGridRect = Rect{side, gridY + 34, cellW * 7, cellH * 6};
   for (int col = 0; col < 7; ++col) {
-    UITheme::drawCenteredText(renderer, Rect{side + col * cellW, gridY, cellW, 24}, UI_10_FONT_ID, gridY,
-                              kWeek[col], true, EpdFontFamily::BOLD);
+    UITheme::drawCenteredText(renderer, Rect{side + col * cellW, gridY, cellW, 24}, UI_10_FONT_ID, gridY, kWeek[col],
+                              true, EpdFontFamily::BOLD);
   }
   const int first = journal::weekday(editYear, editMonth, 1);
   const int days = journal::daysInMonth(editYear, editMonth);
@@ -436,8 +491,7 @@ void ReadingJournalActivity::drawDateEditor() {
   const int buttonY = screenH - buttonH - 20;
   dateCancelRect = Rect{side, buttonY, buttonW, buttonH};
   dateConfirmRect = Rect{side + buttonW + buttonGap, buttonY, buttonW, buttonH};
-  renderer.drawRoundedRect(dateCancelRect.x, dateCancelRect.y, dateCancelRect.width, dateCancelRect.height, 7, 2,
-                           true);
+  renderer.drawRoundedRect(dateCancelRect.x, dateCancelRect.y, dateCancelRect.width, dateCancelRect.height, 7, 2, true);
   renderer.drawRoundedRect(dateConfirmRect.x, dateConfirmRect.y, dateConfirmRect.width, dateConfirmRect.height, 7, 2,
                            true);
   UITheme::drawCenteredText(renderer, dateCancelRect, UI_10_FONT_ID, dateCancelRect.y + 12, "CANCEL", true,
@@ -456,8 +510,11 @@ void ReadingJournalActivity::drawDateEditor() {
 
 void ReadingJournalActivity::render(RenderLock&&) {
   renderer.clearScreen();
-  if (view == View::Calendar) drawCalendar();
-  else if (view == View::Summary) drawSummary();
-  else drawDateEditor();
+  if (view == View::Calendar)
+    drawCalendar();
+  else if (view == View::Summary)
+    drawSummary();
+  else
+    drawDateEditor();
   renderer.displayBuffer();
 }

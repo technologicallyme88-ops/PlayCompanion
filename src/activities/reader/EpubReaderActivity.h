@@ -99,7 +99,7 @@ class EpubReaderActivity final : public ReaderActivity {
   void jumpToPercent(int percent);
   void onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction action);
   void openReaderMenu();
-  void openDictionaryWordSelect();
+  void openDictionaryWordSelect(int initialTouchX = -1, int initialTouchY = -1, bool lookupInitialTouch = false);
   bool launchKOReaderSync();
   void toggleAutoPageTurn(uint8_t selectedPageTurnOption);
   void loadCachedBookmarks();
