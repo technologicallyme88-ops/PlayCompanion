@@ -42,6 +42,7 @@
 #include "pokemon/PokemonService.h"
 #endif
 #include "apps_local/journal/ReadingJournal.h"
+#include "apps_local/journal/ReadingJournalActivity.h"
 #include "fontIds.h"
 #include "util/BookmarkUtil.h"
 #include "util/ScreenshotUtil.h"
@@ -903,7 +904,18 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
         journalFinishRecorded = journal::noteFinished(epub->getPath().c_str());
         if (!journalFinishRecorded) LOG_ERR("ERS", "Could not record journal finish");
       }
-      openReaderMenu();
+      if (journalFinishRecorded && epub) {
+        auto journalActivity = makeUniqueNoThrow<ReadingJournalActivity>(renderer, mappedInput, epub->getPath());
+        if (journalActivity)
+          startActivityForResult(std::move(journalActivity),
+                                 [this](const ActivityResult&) { openReaderMenu(); });
+        else {
+          LOG_ERR("ERS", "OOM: ReadingJournalActivity");
+          openReaderMenu();
+        }
+      } else {
+        openReaderMenu();
+      }
       break;
     }
     case EpubReaderMenuActivity::MenuAction::DISPLAY_QR: {

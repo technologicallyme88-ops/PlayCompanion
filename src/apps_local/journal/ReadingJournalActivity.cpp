@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <iterator>
 
 #include "../../RecentBooksStore.h"
 #include "../../components/UITheme.h"
@@ -88,6 +89,17 @@ void ReadingJournalActivity::onEnter() {
   }
 #endif
   selected = count > 0 ? count - 1 : -1;
+  if (!focusPath.empty()) {
+    returnToCaller = true;
+    for (int i = 0; i < count; ++i) {
+      if (std::strncmp(entries[i].path, focusPath.c_str(), journal::kPathBytes) == 0) {
+        selected = i;
+        view = View::Summary;
+        summaryField = 2;
+        break;
+      }
+    }
+  }
   const uint32_t currentDate = journal::today();
   if (currentDate != 0) {
     year = static_cast<int>(currentDate / 10000);
@@ -107,6 +119,7 @@ void ReadingJournalActivity::onExit() {
 }
 
 void ReadingJournalActivity::stepMonth(const int delta) {
+  calendarSelectedDate = 0;
   month += delta;
   if (month < 1) {
     month = 12;
@@ -115,6 +128,18 @@ void ReadingJournalActivity::stepMonth(const int delta) {
     month = 1;
     ++year;
   }
+}
+
+bool ReadingJournalActivity::entryMatchesDate(const int index, const uint32_t date) const {
+  return index >= 0 && index < count && date != 0 &&
+         (journal::dateKey(entries[index].startedAt) == date || journal::dateKey(entries[index].finishedAt) == date);
+}
+
+int ReadingJournalActivity::firstEntryForDate(const uint32_t date) const {
+  for (int i = count - 1; i >= 0; --i) {
+    if (entryMatchesDate(i, date)) return i;
+  }
+  return -1;
 }
 
 void ReadingJournalActivity::selectNext(const int delta) {
@@ -185,10 +210,17 @@ void ReadingJournalActivity::loop() {
       view = View::Summary;
       requestUpdate();
     } else if (view == View::Summary) {
-      view = View::Calendar;
-      requestUpdate();
+      if (returnToCaller)
+        finish();
+      else {
+        view = View::Calendar;
+        requestUpdate();
+      }
     } else {
-      shelf::leave(renderer, mappedInput);
+      if (returnToCaller)
+        finish();
+      else
+        shelf::leave(renderer, mappedInput);
     }
     return;
   }
@@ -204,22 +236,20 @@ void ReadingJournalActivity::loop() {
         const int day = slot - journal::weekday(year, month, 1) + 1;
         if (day >= 1 && day <= journal::daysInMonth(year, month)) {
           const uint32_t date = static_cast<uint32_t>(year * 10000 + month * 100 + day);
-          for (int i = count - 1; i >= 0; --i) {
-            if (journal::dateKey(entries[i].startedAt) == date || journal::dateKey(entries[i].finishedAt) == date) {
-              selected = i;
-              summaryField = 0;
-              view = View::Summary;
-              requestUpdate();
-              return;
-            }
+          const int firstMatch = firstEntryForDate(date);
+          if (firstMatch >= 0) {
+            calendarSelectedDate = date;
+            selected = firstMatch;
+            requestUpdate();
+            return;
           }
         }
       } else if (tapX >= bookCardRect.x && tapX < bookCardRect.x + bookCardRect.width && tapY >= bookCardRect.y &&
                  tapY < bookCardRect.y + bookCardRect.height) {
-        constexpr int ROW_HEIGHT = 54;
+        constexpr int ROW_HEIGHT = 64;
         const int touched = (tapY - bookCardRect.y) / ROW_HEIGHT;
-        const int index = calendarFirstEntry + touched;
-        if (index >= calendarFirstEntry && index < count) {
+        const int index = touched >= 0 && touched < calendarVisibleCount ? calendarVisibleEntries[touched] : -1;
+        if (index >= 0 && index < count) {
           selected = index;
           summaryField = 0;
           view = View::Summary;
@@ -247,6 +277,22 @@ void ReadingJournalActivity::loop() {
       return;
   } else if (view == View::Summary) {
     journal::Entry& entry = entries[selected];
+    int tapX = 0;
+    int tapY = 0;
+    if (entry.finishedAt != 0 && mappedInput.wasScreenTapped(tapX, tapY)) {
+      const int starCenterY = summaryRowsRect.y + summaryRowsRect.height - 25;
+      if (tapY >= starCenterY - 32 && tapY <= starCenterY + 32) {
+        const int firstStarX = renderer.getScreenWidth() / 2 - 104;
+        const int rating = std::clamp((tapX - firstStarX + 26) / 52 + 1, 1, 5);
+        if (tapX >= firstStarX - 26 && tapX <= firstStarX + 4 * 52 + 26 &&
+            journal::setRating(entry.path, static_cast<uint8_t>(rating))) {
+          entry.rating = static_cast<uint8_t>(rating);
+          summaryField = 2;
+          requestUpdate();
+          return;
+        }
+      }
+    }
     int touched = -1;
     const int rowH = summaryRowsRect.height / 3;
     const auto rowTouch = mappedInput.rowTouch(touched, summaryRowsRect.y, rowH, 3, summaryRowsRect.x,
@@ -372,19 +418,28 @@ void ReadingJournalActivity::drawCalendar() {
   }
   calendarGridRect = Rect{side, top + 32, cellW * 7, cellH * 6};
   const int cardY = top + 32 + 6 * cellH + 12;
-  const int lastFirstEntry = std::max(0, count - 3);
-  calendarFirstEntry = std::clamp(selected - 1, 0, lastFirstEntry);
-  const int visibleRows = std::min(3, count - calendarFirstEntry);
-  bookCardRect = Rect{side, cardY - 12, sw - side * 2, visibleRows * 54};
-  if (visibleRows > 0) {
-    for (int row = 0; row < visibleRows; ++row) {
-      const int index = calendarFirstEntry + row;
-      const int rowY = cardY + row * 54;
+  calendarVisibleCount = 0;
+  std::fill(std::begin(calendarVisibleEntries), std::end(calendarVisibleEntries), -1);
+  if (calendarSelectedDate != 0) {
+    for (int i = count - 1; i >= 0 && calendarVisibleCount < 3; --i) {
+      if (entryMatchesDate(i, calendarSelectedDate)) calendarVisibleEntries[calendarVisibleCount++] = i;
+    }
+  } else {
+    const int firstEntry = std::clamp(selected - 1, 0, std::max(0, count - 3));
+    for (int i = firstEntry; i < count && calendarVisibleCount < 3; ++i)
+      calendarVisibleEntries[calendarVisibleCount++] = i;
+  }
+  constexpr int ROW_HEIGHT = 64;
+  bookCardRect = Rect{side, cardY - 12, sw - side * 2, calendarVisibleCount * ROW_HEIGHT};
+  if (calendarVisibleCount > 0) {
+    for (int row = 0; row < calendarVisibleCount; ++row) {
+      const int index = calendarVisibleEntries[row];
+      const int rowY = cardY + row * ROW_HEIGHT;
       const auto& entry = entries[index];
-      if (index == selected) renderer.drawRoundedRect(side, rowY - 12, sw - side * 2, 48, 8, 2, true);
-      UITheme::drawCenteredWrappedText(renderer, Rect{side + 12, rowY - 4, sw - side * 2 - 24, 25}, UI_10_FONT_ID,
-                                       entry.title, 1, index == selected, EpdFontFamily::BOLD);
-      renderer.drawText(UI_10_FONT_ID, side + 12, rowY + 27,
+      renderer.drawRoundedRect(side, rowY - 12, sw - side * 2, 56, 8, index == selected ? 2 : 1, true);
+      UITheme::drawCenteredWrappedText(renderer, Rect{side + 12, rowY - 8, sw - side * 2 - 24, 24}, UI_10_FONT_ID,
+                                       entry.title[0] ? entry.title : entry.path, 1, true, EpdFontFamily::BOLD);
+      renderer.drawText(UI_10_FONT_ID, side + 12, rowY + 20,
                         entry.finishedAt ? "FINISHED  •  DETAILS" : "READING  •  DETAILS");
     }
   } else {

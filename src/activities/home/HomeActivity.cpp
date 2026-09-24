@@ -6,9 +6,8 @@
 #include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <I18n.h>
-#if defined(CROSSINK_ENABLE_POKEMON)
 #include <Memory.h>
-
+#if defined(CROSSINK_ENABLE_POKEMON)
 #include "activities/pokemon/PokemonActivity.h"
 #include "pokemon/PokemonCompanionBridge.h"
 #include "pokemon/PokemonCompanionDialogue.h"
@@ -24,6 +23,8 @@
 #include <vector>
 
 #include "../../apps_local/Shelf.h"  // CrossPlay game/app shelf
+#include "../../apps_local/journal/ReadingJournal.h"
+#include "../../apps_local/journal/ReadingJournalActivity.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "MappedInputManager.h"
@@ -691,6 +692,9 @@ void HomeActivity::freeCoverBuffer() {
 }
 
 void HomeActivity::loop() {
+  if (bookOptionsPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return;
+  if (farmOptionsPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return;
+
   const int menuCount = getMenuItemCount();
   const auto& metrics = UITheme::getInstance().getMetrics();
 
@@ -797,6 +801,18 @@ void HomeActivity::loop() {
   const int recentCount = std::min(static_cast<int>(recentBooks.size()), coverColumnCount);
   const int coverColumnWidth = (renderer.getScreenWidth() - 2 * metrics.contentSidePadding) / coverColumnCount;
 #if FREEINK_DEVICE_X4PRO
+  int farmX = 0;
+  int farmY = 0;
+  if (farmPlotRect.width > 0 && mappedInput.wasScreenTapped(farmX, farmY) && farmX >= farmPlotRect.x &&
+      farmX < farmPlotRect.x + farmPlotRect.width && farmY >= farmPlotRect.y &&
+      farmY < farmPlotRect.y + farmPlotRect.height) {
+    const char* options[] = {tr(STR_FARM_BUY_SEEDS), tr(STR_FARM_HARVEST), tr(STR_FARM_SELL_CROPS)};
+    farmOptionsPopup.show(tr(STR_FARM), options, 3, 0, [this](int) { requestUpdate(); });
+    requestUpdate();
+    return;
+  }
+#endif
+#if FREEINK_DEVICE_X4PRO
   int heldBookX = 0;
   int heldBookY = 0;
   if (mappedInput.wasScreenLongPress(heldBookX, heldBookY)) {
@@ -807,15 +823,42 @@ void HomeActivity::loop() {
         heldBookY < metrics.homeTopPadding + metrics.homeCoverTileHeight) {
       const std::string path = recentBooks[heldBook].path;
       const std::string title = recentBooks[heldBook].title;
-      startActivityForResult(
-          std::make_unique<ConfirmationActivity>(renderer, mappedInput, tr(STR_REMOVE_FROM_RECENTS), title),
-          [this, path, coverColumnCount](const ActivityResult& result) {
-            if (!result.isCancelled && RECENT_BOOKS.removeByPath(path)) {
-              loadRecentBooks(coverColumnCount);
-              selectorIndex = 0;
-              requestUpdate(true);
-            }
-          });
+      const char* options[] = {tr(STR_OPEN), tr(STR_READING_JOURNAL), tr(STR_MARK_AS_FINISHED),
+                               tr(STR_REMOVE_FROM_RECENTS)};
+      bookOptionsPopup.show(title.c_str(), options, 4, 0, [this, path, title, coverColumnCount](const int option) {
+        if (option == 0) {
+          onSelectBook(path);
+        } else if (option == 1) {
+          auto journalActivity = makeUniqueNoThrow<ReadingJournalActivity>(renderer, mappedInput, path);
+          if (journalActivity)
+            startActivityForResult(std::move(journalActivity), [](const ActivityResult&) {});
+          else
+            LOG_ERR("HOME", "OOM: ReadingJournalActivity");
+        } else if (option == 2) {
+          if (journal::noteFinished(path.c_str())) {
+            auto journalActivity = makeUniqueNoThrow<ReadingJournalActivity>(renderer, mappedInput, path);
+            if (journalActivity)
+              startActivityForResult(std::move(journalActivity), [](const ActivityResult&) {});
+            else
+              LOG_ERR("HOME", "OOM: ReadingJournalActivity");
+          }
+        } else if (option == 3) {
+          auto confirmation =
+              makeUniqueNoThrow<ConfirmationActivity>(renderer, mappedInput, tr(STR_REMOVE_FROM_RECENTS), title);
+          if (confirmation) {
+            startActivityForResult(std::move(confirmation), [this, path, coverColumnCount](const ActivityResult& result) {
+              if (!result.isCancelled && RECENT_BOOKS.removeByPath(path)) {
+                loadRecentBooks(coverColumnCount);
+                selectorIndex = 0;
+                requestUpdate(true);
+              }
+            });
+          } else {
+            LOG_ERR("HOME", "OOM: ConfirmationActivity");
+          }
+        }
+      });
+      requestUpdate();
       return;
     }
   }
@@ -972,6 +1015,7 @@ void HomeActivity::render(RenderLock&&) {
     menuRect.height = std::max(0, pageHeight - metrics.buttonHintsHeight - menuRect.y - 8);
   }
   const Rect coverRect{0, metrics.homeTopPadding, pageWidth, metrics.homeCoverTileHeight};
+  farmPlotRect = GUI.getHomeFarmPlotRect(coverRect);
   const auto labelAt = [&menuItems](int index) { return std::string(menuItems[index]); };
 
   // The theme decides where the companion goes and what gives up room for it.
@@ -991,6 +1035,7 @@ void HomeActivity::render(RenderLock&&) {
   coverRectW = drawnCover.width;
   GUI.drawRecentBookCover(renderer, drawnCover, recentBooks, selectorIndex, coverRendered, coverBufferStored,
                           bufferRestored, std::bind(&HomeActivity::storeCoverBuffer, this));
+  GUI.drawHomeFarmPlot(renderer, farmPlotRect);
 
   const int renderedSelection =
       metrics.homeContinueReadingInMenu ? selectorIndex : selectorIndex - static_cast<int>(recentBooks.size());
@@ -1046,6 +1091,9 @@ void HomeActivity::render(RenderLock&&) {
   const auto labels = mappedInput.mapLabels(recentBooks.empty() ? "" : tr(STR_RESUME), tr(STR_SELECT), tr(STR_DIR_UP),
                                             tr(STR_DIR_DOWN));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
+
+  if (bookOptionsPopup.processRender(renderer, mappedInput)) return;
+  if (farmOptionsPopup.processRender(renderer, mappedInput)) return;
 
   if (panelHoldsRetainedFrame) {
     // A sleep wake leaves the sleep screen on the panel and skips the clearing

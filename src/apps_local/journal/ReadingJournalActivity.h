@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
 #include "../../activities/Activity.h"
 #include "../../components/themes/BaseTheme.h"
@@ -8,8 +9,8 @@
 
 class ReadingJournalActivity final : public Activity {
  public:
-  ReadingJournalActivity(GfxRenderer& renderer, MappedInputManager& mappedInput)
-      : Activity("ReadingJournal", renderer, mappedInput) {}
+  ReadingJournalActivity(GfxRenderer& renderer, MappedInputManager& mappedInput, std::string focusPath = {})
+      : Activity("ReadingJournal", renderer, mappedInput), focusPath(std::move(focusPath)) {}
   static std::unique_ptr<Activity> create(GfxRenderer& renderer, MappedInputManager& mappedInput);
 
   void onEnter() override;
@@ -28,12 +29,17 @@ class ReadingJournalActivity final : public Activity {
   bool saveDateEdit();
   void stepEditDay(int delta);
   void stepEditMonth(int delta);
+  bool entryMatchesDate(int index, uint32_t date) const;
+  int firstEntryForDate(uint32_t date) const;
 
   std::unique_ptr<journal::Entry[]> entries;
   int count = 0;
   int selected = -1;
   int year = 2026;
   int month = 1;
+  std::string focusPath;
+  bool returnToCaller = false;
+  uint32_t calendarSelectedDate = 0;
   View view = View::Calendar;
   int summaryField = 0;  // 0 started, 1 finished, 2 rating
   bool editingFinish = false;
@@ -42,7 +48,8 @@ class ReadingJournalActivity final : public Activity {
   int editDay = 1;
   Rect bookCardRect{};
   Rect calendarGridRect{};
-  int calendarFirstEntry = 0;
+  int calendarVisibleEntries[3] = {-1, -1, -1};
+  int calendarVisibleCount = 0;
   Rect summaryRowsRect{};
   Rect dateGridRect{};
   Rect dateCancelRect{};

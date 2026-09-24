@@ -4,6 +4,7 @@
 
 #include "./FileBrowserActivity.h"
 #include "activities/Activity.h"
+#include "components/OptionPopup.h"
 #include "util/ButtonNavigator.h"
 
 struct RecentBook;
@@ -28,6 +29,9 @@ class HomeActivity final : public Activity {
   int coverRectW = 0;
   int coverRectH = 0;
   std::vector<RecentBook> recentBooks;
+  OptionPopup bookOptionsPopup;
+  OptionPopup farmOptionsPopup;
+  Rect farmPlotRect;
   const HomeMenuItem initialMenuItem;
 
   // Convert HomeMenuItem to menu index (used in onEnter)
