@@ -56,19 +56,21 @@ else
   done
 fi
 
-# -- 2. the app image keeps the one name the updater will match ----------------
-#
-# Read out of the C++ rather than hardcoded here: if someone changes the literal
-# the updater compares against, this test must follow it, not contradict it.
-# Since 1.6.0rc the parser compares against a runtime member; the literal the
-# X4 Pro actually requests lives at OtaUpdater's setFirmwareAssetName call.
-asset="$(grep -oE 'setFirmwareAssetName\("[^"]+"\)' "$ROOT/src/network/OtaUpdater.cpp" | head -1 | sed 's/.*"\(.*\)".*/\1/')"
-if [ -z "$asset" ]; then
-  bad "cannot find the literal asset name OtaUpdater.cpp pins for this fork"
-elif grep -qE "dist/$asset( |\"|$)" "$WF"; then
+# -- 2. every supported device gets the asset its updater requests ------------
+for asset in firmware-x3.bin firmware-x4.bin firmware-pro.bin; do
+  if grep -qE "dist/$asset( |\"|$)" "$WF" && grep -q "\"$asset\"" "$ROOT/src/network/FirmwareBoardTag.cpp"; then
+    ok
+  else
+    bad "the release/updater mapping is missing '$asset'"
+  fi
+done
+
+# Keep the legacy Pro name for units running an updater from before the
+# board-specific asset mapping was introduced.
+if grep -qE 'dist/firmware\.bin( |"|$)' "$WF"; then
   ok
 else
-  bad "the release does not publish an asset named '$asset', so Check for updates finds nothing"
+  bad "the release dropped the legacy X4 Pro firmware.bin compatibility asset"
 fi
 
 # -- 3. every documented flash command names a file the release actually makes -

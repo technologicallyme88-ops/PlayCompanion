@@ -25,6 +25,11 @@ extern const char TAG[];
 const char* boardName();
 size_t boardNameLen();
 
+// Release asset selected by this build's updater. This is separate from the
+// compatibility tag because X3 and X4 remain one validated C3 image class but
+// are published as distinct user-facing builds.
+const char* firmwareAssetName();
+
 // Incremental scanner: feed every byte of a candidate image in stream order,
 // then check mismatch(). State persists across feed() calls, so chunk
 // boundaries splitting the tag are handled.

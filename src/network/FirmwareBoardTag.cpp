@@ -41,6 +41,18 @@ const char TAG[] = "CROSSPOINT-BOARD-V1:" CROSSPOINT_BOARD_NAME ";";
 const char* boardName() { return TAG + MAGIC_LEN; }
 size_t boardNameLen() { return sizeof(TAG) - 1 - MAGIC_LEN - 1; }  // strip magic and ';'
 
+const char* firmwareAssetName() {
+#if FREEINK_DEVICE_X4PRO
+  return "firmware-pro.bin";
+#elif FREEINK_DEVICE_X3
+  return "firmware-x3.bin";
+#elif FREEINK_DEVICE_X4
+  return "firmware-x4.bin";
+#else
+  return "firmware.bin";
+#endif
+}
+
 void Scanner::feed(const uint8_t* data, size_t len) {
   if (mismatchFound) return;
   for (size_t i = 0; i < len; i++) {

@@ -38,14 +38,8 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
   // OOM there aborts. fetchUrl handles the verified-https GET, redirects, and
   // User-Agent (see HttpDownloader).
   ReleaseJsonParser releaseParser;
-  // FORK CHANGE: upstream suffixes the asset per board (firmware-x4pro.bin)
-  // because one release feeds many devices. This fork releases for exactly one
-  // device, and every unit in the field since v1.0.0 asks for the literal
-  // "firmware.bin" -- adopting the suffix would strand them: their updater
-  // would keep finding firmware.bin (and flash it), while THIS build would
-  // stop finding anything the moment a release dropped the plain name. One
-  // device, one name, forever. host-tests/release pins the workflow to it.
-  releaseParser.setFirmwareAssetName("firmware.bin");
+  const char* const assetName = board_tag::firmwareAssetName();
+  releaseParser.setFirmwareAssetName(assetName);
   const bool ok = HttpDownloader::fetchUrl(latestReleaseUrl, [&releaseParser](const uint8_t* data, size_t len) {
     releaseParser.feed(reinterpret_cast<const char*>(data), len);
     return true;
@@ -64,7 +58,7 @@ OtaUpdater::OtaUpdaterError OtaUpdater::checkForUpdate() {
   }
 
   if (!releaseParser.foundFirmware()) {
-    LOG_INF("OTA", "No firmware.bin asset in latest release");
+    LOG_INF("OTA", "No %s asset in latest release", assetName);
     return NO_UPDATE;
   }
 

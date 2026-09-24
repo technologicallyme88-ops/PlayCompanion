@@ -45,6 +45,7 @@ data class ReaderFile(val name: String, val size: Long, val directory: Boolean)
 data class ReaderStatus(
     val ip: String,
     val mode: String,
+    val device: String,
     val version: String,
     val storageTotal: Long,
     val storageUsed: Long
@@ -53,8 +54,19 @@ data class ReaderStatus(
 data class FirmwareRelease(
     val version: String,
     val publishedAt: String,
-    val releaseUrl: String
+    val releaseUrl: String,
+    val assetName: String
 )
+
+private fun firmwareAssetName(device: String, version: String): String? {
+    val identity = "$device $version".lowercase()
+    return when {
+        "x4 pro" in identity || "x4pro" in identity -> "firmware-pro.bin"
+        "x3" in identity -> "firmware-x3.bin"
+        "x4" in identity -> "firmware-x4.bin"
+        else -> null
+    }
+}
 
 private fun uniqueFileName(name: String, existing: Set<String>): String {
     if (name !in existing) return name
@@ -135,6 +147,7 @@ class ReaderApi(
             ReaderStatus(
                 ip = json.optString("ip"),
                 mode = json.optString("mode"),
+                device = json.optString("device"),
                 version = json.optString("version"),
                 storageTotal = json.optLong("storageTotal"),
                 storageUsed = json.optLong("storageUsed")
@@ -142,7 +155,7 @@ class ReaderApi(
         }
     }
 
-    suspend fun latestFirmware(): FirmwareRelease? = withContext(Dispatchers.IO) {
+    suspend fun latestFirmware(assetName: String): FirmwareRelease? = withContext(Dispatchers.IO) {
         val url = "https://api.github.com/repos/technologicallyme88-ops/PlayCompanion/releases/latest"
         client.newCall(
             Request.Builder().url(url).header("Accept", "application/vnd.github+json").build()
@@ -151,13 +164,14 @@ class ReaderApi(
             check(response.isSuccessful) { "Release check returned HTTP ${response.code}" }
             val json = org.json.JSONObject(response.body?.string() ?: "{}")
             val hasOtaAsset = json.optJSONArray("assets")?.let { assets ->
-                (0 until assets.length()).any { index -> assets.optJSONObject(index)?.optString("name") == "firmware.bin" }
+                (0 until assets.length()).any { index -> assets.optJSONObject(index)?.optString("name") == assetName }
             } ?: false
             if (!hasOtaAsset) return@use null
             FirmwareRelease(
                 version = json.optString("tag_name"),
                 publishedAt = json.optString("published_at"),
-                releaseUrl = json.optString("html_url")
+                releaseUrl = json.optString("html_url"),
+                assetName = assetName
             )
         }
     }
@@ -265,6 +279,7 @@ private fun FirmwarePage(
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("Reader firmware", style = MaterialTheme.typography.titleMedium)
                 Text(reader?.version?.takeIf { it.isNotBlank() } ?: "Connect your reader on the Files tab first")
+                reader?.device?.takeIf { it.isNotBlank() }?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             }
         }
         Card(Modifier.fillMaxWidth()) {
@@ -275,6 +290,7 @@ private fun FirmwarePage(
                     release == null -> Text("Tap Check for updates to look for a compatible OTA release.")
                     else -> {
                         Text(release.version)
+                        Text(release.assetName, style = MaterialTheme.typography.bodySmall)
                         if (release.publishedAt.isNotBlank()) Text("Published ${release.publishedAt.take(10)}", style = MaterialTheme.typography.bodySmall)
                         val current = reader?.version.orEmpty()
                         val updateAvailable = current.isNotBlank() && isNewerFirmware(release.version, current)
@@ -371,13 +387,24 @@ private fun PlayCompanionApp() {
     }
 
     fun checkFirmware() {
+        val reader = status
+        val assetName = reader?.let { firmwareAssetName(it.device, it.version) }
+        if (reader == null || assetName == null) {
+            firmwareRelease = null
+            firmwareMessage = if (reader == null) {
+                "Connect the reader on the Files tab before checking for updates."
+            } else {
+                "This reader did not report a supported X3, X4, or X4 Pro device type."
+            }
+            return
+        }
         checkingFirmware = true
-        firmwareMessage = "Checking GitHub releases…"
+        firmwareMessage = "Checking GitHub for $assetName…"
         scope.launch {
-            runCatching { api.latestFirmware() }
+            runCatching { api.latestFirmware(assetName) }
                 .onSuccess {
                     firmwareRelease = it
-                    firmwareMessage = if (it == null) "No compatible firmware.bin asset is published in the latest release." else "Latest compatible release found."
+                    firmwareMessage = if (it == null) "No compatible $assetName asset is published in the latest release." else "Latest compatible release found."
                 }
                 .onFailure { firmwareMessage = it.message ?: "Could not check for updates" }
             checkingFirmware = false
