@@ -35,6 +35,7 @@ import okhttp3.Request
 import okhttp3.FormBody
 import okio.BufferedSink
 import org.json.JSONArray
+import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -77,6 +78,25 @@ private fun uniqueFileName(name: String, existing: Set<String>): String {
     while ("$stem ($copy)$extension" in existing) copy++
     return "$stem ($copy)$extension"
 }
+
+data class QueuedBook(val name: String, val size: Long)
+
+private fun queueManifest(file: File, books: List<QueuedBook>) {
+    file.writeText(JSONArray().apply {
+        books.forEach { put(JSONObject().put("name", it.name).put("size", it.size)) }
+    }.toString())
+}
+
+private fun readQueueManifest(file: File): List<QueuedBook> = runCatching {
+    val json = JSONArray(file.takeIf { it.exists() }?.readText() ?: "[]")
+    buildList {
+        for (index in 0 until json.length()) {
+            val item = json.getJSONObject(index)
+            val name = item.optString("name")
+            if (name.isNotBlank()) add(QueuedBook(name, item.optLong("size")))
+        }
+    }
+}.getOrDefault(emptyList())
 
 private fun formatBytes(bytes: Long): String = when {
     bytes >= 1_000_000_000L -> "%.1f GB".format(bytes / 1_000_000_000.0)
@@ -330,6 +350,41 @@ private fun FirmwarePage(
 }
 
 @Composable
+private fun QueuePage(
+    books: List<QueuedBook>,
+    connected: Boolean,
+    busy: Boolean,
+    message: String,
+    onAdd: () -> Unit,
+    onUpload: () -> Unit
+) {
+    Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Upload queue", style = MaterialTheme.typography.headlineSmall)
+        Text("EPUBs are optimized here and kept on this phone until you choose a connected reader.")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = onAdd, enabled = !busy) { Text("Add EPUBs") }
+            Button(onClick = onUpload, enabled = connected && books.isNotEmpty() && !busy) { Text("Upload all") }
+        }
+        if (books.isEmpty()) {
+            Text("No EPUBs queued yet.", style = MaterialTheme.typography.bodyLarge)
+        } else {
+            Text("${books.size} queued", style = MaterialTheme.typography.titleMedium)
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                items(books, key = { it.name }) { book ->
+                    ListItem(
+                        headlineContent = { Text(book.name) },
+                        supportingContent = { Text(formatBytes(book.size)) }
+                    )
+                    HorizontalDivider()
+                }
+            }
+        }
+        Text(message, style = MaterialTheme.typography.bodySmall)
+        if (!connected && books.isNotEmpty()) Text("Connect a reader to upload the queue.")
+    }
+}
+
+@Composable
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 private fun PlayCompanionApp() {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -350,6 +405,10 @@ private fun PlayCompanionApp() {
     var newFolderName by remember { mutableStateOf("") }
     var uploadProgress by remember { mutableFloatStateOf(0f) }
     var activeUpload by remember { mutableStateOf<Call?>(null) }
+    val queueItems = remember { mutableStateListOf<QueuedBook>() }
+    var queueMessage by remember { mutableStateOf("Books are optimized on import and wait here for a reader.") }
+    var showQueueUploadPrompt by remember { mutableStateOf(false) }
+    var queueBusy by remember { mutableStateOf(false) }
     var status by remember { mutableStateOf<ReaderStatus?>(null) }
     var message by remember { mutableStateOf("Enter the reader address, then tap Connect") }
     var activeTab by remember { mutableIntStateOf(0) }
@@ -361,6 +420,10 @@ private fun PlayCompanionApp() {
     val lifecycleOwner = LocalLifecycleOwner.current
     val currentStatus by rememberUpdatedState(status)
     val currentPath by rememberUpdatedState(path)
+    val queueDir = remember { File(context.filesDir, "epub_queue").apply { mkdirs() } }
+    val queueManifestFile = remember { File(queueDir, "queue.json") }
+
+    fun saveQueue() = queueManifest(queueManifestFile, queueItems.toList())
 
     fun load(target: String = path) {
         message = "Checking reader connection…"
@@ -378,11 +441,40 @@ private fun PlayCompanionApp() {
                 files = readerFiles
                 path = target
                 message = "${readerFiles.size} items"
+                if (queueItems.isNotEmpty()) showQueueUploadPrompt = true
             }
                 .onFailure {
                     status = null
                     message = it.message ?: "Reader is unavailable"
                 }
+        }
+    }
+
+    fun uploadQueue() {
+        if (queueBusy || status == null || queueItems.isEmpty()) return
+        queueBusy = true
+        scope.launch {
+            val pending = queueItems.toList()
+            runCatching {
+                pending.forEachIndexed { index, book ->
+                    val file = File(queueDir, book.name)
+                    check(file.exists()) { "Queued file is missing: ${book.name}" }
+                    queueMessage = "Uploading ${index + 1} of ${pending.size}: ${book.name}"
+                    api.upload(address, "/", file, { sent, total ->
+                        if (total > 0) uploadProgress = (index + sent.toFloat() / total) / pending.size
+                    }) { activeUpload = it }
+                    file.delete()
+                }
+            }.onSuccess {
+                queueItems.clear()
+                saveQueue()
+                queueMessage = "Queued books uploaded"
+                message = "Uploaded ${pending.size} queued book${if (pending.size == 1) "" else "s"}"
+                load(path)
+            }.onFailure { queueMessage = it.message ?: "Queued upload failed" }
+            activeUpload = null
+            uploadProgress = 0f
+            queueBusy = false
         }
     }
 
@@ -412,6 +504,7 @@ private fun PlayCompanionApp() {
     }
 
     LaunchedEffect(Unit) {
+        queueItems.addAll(readQueueManifest(queueManifestFile).filter { File(queueDir, it.name).exists() })
         if (preferences.getBoolean("auto_connect", false)) load("/")
     }
 
@@ -466,6 +559,40 @@ private fun PlayCompanionApp() {
                 }
                     .onSuccess { activeUpload = null; uploadProgress = 0f; message = "Upload complete"; load(path) }
                     .onFailure { activeUpload = null; uploadProgress = 0f; message = if (it is java.io.IOException && it.message?.contains("canceled", true) == true) "Upload cancelled" else it.message ?: "Upload failed" }
+            }
+        }
+    }
+    val queuePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            queueBusy = true
+            scope.launch(Dispatchers.IO) {
+                runCatching {
+                    val existing = queueItems.map { it.name }.toMutableSet()
+                    uris.forEachIndexed { index, uri ->
+                        val displayName = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                            if (it.moveToFirst()) it.getString(0) else null
+                        } ?: "book-${index + 1}.epub"
+                        check(displayName.endsWith(".epub", ignoreCase = true)) { "$displayName is not an EPUB" }
+                        val fallback = uniqueFileName(displayName, existing)
+                        val name = context.contentResolver.openInputStream(uri)?.use { source ->
+                            uniqueFileName(EpubOptimizer.metadataFileName(source, fallback), existing)
+                        } ?: fallback
+                        val output = File(queueDir, name)
+                        context.contentResolver.openInputStream(uri)?.use { source ->
+                            EpubOptimizer.optimize(source, output) { progress ->
+                                queueMessage = "Optimizing ${index + 1} of ${uris.size}… ${(progress * 100).toInt()}%"
+                            }
+                        } ?: error("Unable to read $displayName")
+                        existing.add(name)
+                        withContext(Dispatchers.Main) {
+                            queueItems.add(QueuedBook(name, output.length()))
+                            saveQueue()
+                        }
+                    }
+                }.onSuccess {
+                    queueMessage = "${uris.size} book${if (uris.size == 1) "" else "s"} optimized and queued"
+                }.onFailure { queueMessage = it.message ?: "Could not optimize selected books" }
+                queueBusy = false
             }
         }
     }
@@ -540,11 +667,14 @@ private fun PlayCompanionApp() {
             Column(Modifier.padding(padding).padding(16.dp).fillMaxSize()) {
                 TabRow(selectedTabIndex = activeTab) {
                     Tab(selected = activeTab == 0, onClick = { activeTab = 0 }, text = { Text("Files") })
-                    Tab(selected = activeTab == 1, onClick = { activeTab = 1 }, text = { Text("Firmware") })
+                    Tab(selected = activeTab == 1, onClick = { activeTab = 1 }, text = { Text("Queue") })
+                    Tab(selected = activeTab == 2, onClick = { activeTab = 2 }, text = { Text("Firmware") })
                 }
                 Spacer(Modifier.height(16.dp))
-                if (activeTab == 1) {
+                if (activeTab == 2) {
                     FirmwarePage(status, firmwareRelease, checkingFirmware, firmwareMessage, ::checkFirmware)
+                } else if (activeTab == 1) {
+                    QueuePage(queueItems, status != null, queueBusy, queueMessage, { queuePicker.launch(arrayOf("application/epub+zip")) }, ::uploadQueue)
                 } else {
                     if (status == null) {
                     OutlinedTextField(
@@ -776,6 +906,19 @@ private fun PlayCompanionApp() {
                 }) { Text("Create") }
             },
             dismissButton = { TextButton(onClick = { showCreateFolder = false }) { Text("Cancel") } }
+        )
+    }
+    if (showQueueUploadPrompt && queueItems.isNotEmpty() && status != null) {
+        AlertDialog(
+            onDismissRequest = { showQueueUploadPrompt = false },
+            title = { Text("Upload queued books?") },
+            text = { Text("${queueItems.size} optimized EPUB${if (queueItems.size == 1) " is" else "s are"} ready for ${status?.device?.ifBlank { "this reader" }}.") },
+            confirmButton = {
+                TextButton(onClick = { showQueueUploadPrompt = false; uploadQueue() }) { Text("Upload all") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showQueueUploadPrompt = false }) { Text("Not now") }
+            }
         )
     }
 }
