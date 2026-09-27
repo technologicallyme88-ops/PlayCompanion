@@ -377,7 +377,8 @@ private fun QueuePage(
     busy: Boolean,
     message: String,
     onAdd: () -> Unit,
-    onUpload: () -> Unit
+    onUpload: () -> Unit,
+    onRemove: (QueuedBook) -> Unit
 ) {
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Upload queue", style = MaterialTheme.typography.headlineSmall)
@@ -394,7 +395,12 @@ private fun QueuePage(
                 items(books, key = { it.name }) { book ->
                     ListItem(
                         headlineContent = { Text(book.name) },
-                        supportingContent = { Text(formatBytes(book.size)) }
+                        supportingContent = { Text(formatBytes(book.size)) },
+                        trailingContent = {
+                            TextButton(onClick = { onRemove(book) }, enabled = !busy) {
+                                Text("Remove")
+                            }
+                        }
                     )
                     HorizontalDivider()
                 }
@@ -445,6 +451,14 @@ private fun PlayCompanionApp(incomingEpubs: List<Uri>, onIncomingConsumed: () ->
     val queueManifestFile = remember { File(queueDir, "queue.json") }
 
     fun saveQueue() = queueManifest(queueManifestFile, queueItems.toList())
+
+    fun removeQueuedBook(book: QueuedBook) {
+        if (queueBusy) return
+        queueItems.remove(book)
+        File(queueDir, book.name).delete()
+        saveQueue()
+        queueMessage = "Removed ${book.name} from queue"
+    }
 
     fun queueEpubs(uris: List<Uri>) {
         if (uris.isEmpty() || queueBusy) return
@@ -711,7 +725,7 @@ private fun PlayCompanionApp(incomingEpubs: List<Uri>, onIncomingConsumed: () ->
                 if (activeTab == 2) {
                     FirmwarePage(status, firmwareRelease, checkingFirmware, firmwareMessage, ::checkFirmware)
                 } else if (activeTab == 1) {
-                    QueuePage(queueItems, status != null, queueBusy, queueMessage, { queuePicker.launch(arrayOf("application/epub+zip")) }, ::uploadQueue)
+                    QueuePage(queueItems, status != null, queueBusy, queueMessage, { queuePicker.launch(arrayOf("application/epub+zip")) }, ::uploadQueue, ::removeQueuedBook)
                 } else {
                     if (status == null) {
                     OutlinedTextField(
