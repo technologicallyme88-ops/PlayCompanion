@@ -1,6 +1,7 @@
 package org.playcompanion.app
 
 import android.os.Bundle
+import android.content.Intent
 import android.content.ContentResolver
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -279,9 +280,29 @@ class ReaderApi(
 }
 
 class MainActivity : ComponentActivity() {
+    private var incomingEpubs by mutableStateOf<List<Uri>>(emptyList())
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent { PlayCompanionApp() }
+        acceptEpubIntent(intent)
+        setContent { PlayCompanionApp(incomingEpubs) { incomingEpubs = emptyList() } }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        acceptEpubIntent(intent)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun acceptEpubIntent(intent: Intent?) {
+        val uris = when (intent?.action) {
+            Intent.ACTION_VIEW -> listOfNotNull(intent.data)
+            Intent.ACTION_SEND -> listOfNotNull(intent.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri)
+            Intent.ACTION_SEND_MULTIPLE -> intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM).orEmpty()
+            else -> emptyList()
+        }
+        if (uris.isNotEmpty()) incomingEpubs = uris
     }
 }
 
@@ -386,7 +407,7 @@ private fun QueuePage(
 
 @Composable
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
-private fun PlayCompanionApp() {
+private fun PlayCompanionApp(incomingEpubs: List<Uri>, onIncomingConsumed: () -> Unit) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val preferences = remember { context.getSharedPreferences("play_companion", android.content.Context.MODE_PRIVATE) }
     var address by remember { mutableStateOf(preferences.getString("reader_address", "http://192.168.4.1") ?: "http://192.168.4.1") }
@@ -424,6 +445,46 @@ private fun PlayCompanionApp() {
     val queueManifestFile = remember { File(queueDir, "queue.json") }
 
     fun saveQueue() = queueManifest(queueManifestFile, queueItems.toList())
+
+    fun queueEpubs(uris: List<Uri>) {
+        if (uris.isEmpty() || queueBusy) return
+        activeTab = 1
+        queueBusy = true
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                val existing = queueItems.map { it.name }.toMutableSet()
+                uris.forEachIndexed { index, uri ->
+                    val displayName = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                        if (it.moveToFirst()) it.getString(0) else null
+                    } ?: "book-${index + 1}.epub"
+                    check(displayName.endsWith(".epub", ignoreCase = true)) { "$displayName is not an EPUB" }
+                    val fallback = uniqueFileName(displayName, existing)
+                    val name = context.contentResolver.openInputStream(uri)?.use { source ->
+                        uniqueFileName(EpubOptimizer.metadataFileName(source, fallback), existing)
+                    } ?: fallback
+                    val output = File(queueDir, name)
+                    context.contentResolver.openInputStream(uri)?.use { source ->
+                        EpubOptimizer.optimize(source, output) { progress ->
+                            queueMessage = "Optimizing ${index + 1} of ${uris.size}… ${(progress * 100).toInt()}%"
+                        }
+                    } ?: error("Unable to read $displayName")
+                    existing.add(name)
+                    withContext(Dispatchers.Main) {
+                        queueItems.add(QueuedBook(name, output.length()))
+                        saveQueue()
+                    }
+                }
+            }.onSuccess {
+                withContext(Dispatchers.Main) {
+                    val total = queueItems.size
+                    queueMessage = "$total book${if (total == 1) "" else "s"} ready in queue"
+                }
+            }.onFailure {
+                withContext(Dispatchers.Main) { queueMessage = it.message ?: "Could not optimize selected books" }
+            }
+            withContext(Dispatchers.Main) { queueBusy = false }
+        }
+    }
 
     fun load(target: String = path) {
         message = "Checking reader connection…"
@@ -508,6 +569,13 @@ private fun PlayCompanionApp() {
         if (preferences.getBoolean("auto_connect", false)) load("/")
     }
 
+    LaunchedEffect(incomingEpubs) {
+        if (incomingEpubs.isNotEmpty()) {
+            queueEpubs(incomingEpubs)
+            onIncomingConsumed()
+        }
+    }
+
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME && currentStatus != null && preferences.getBoolean("auto_connect", false)) {
@@ -563,38 +631,7 @@ private fun PlayCompanionApp() {
         }
     }
     val queuePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris: List<Uri> ->
-        if (uris.isNotEmpty()) {
-            queueBusy = true
-            scope.launch(Dispatchers.IO) {
-                runCatching {
-                    val existing = queueItems.map { it.name }.toMutableSet()
-                    uris.forEachIndexed { index, uri ->
-                        val displayName = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
-                            if (it.moveToFirst()) it.getString(0) else null
-                        } ?: "book-${index + 1}.epub"
-                        check(displayName.endsWith(".epub", ignoreCase = true)) { "$displayName is not an EPUB" }
-                        val fallback = uniqueFileName(displayName, existing)
-                        val name = context.contentResolver.openInputStream(uri)?.use { source ->
-                            uniqueFileName(EpubOptimizer.metadataFileName(source, fallback), existing)
-                        } ?: fallback
-                        val output = File(queueDir, name)
-                        context.contentResolver.openInputStream(uri)?.use { source ->
-                            EpubOptimizer.optimize(source, output) { progress ->
-                                queueMessage = "Optimizing ${index + 1} of ${uris.size}… ${(progress * 100).toInt()}%"
-                            }
-                        } ?: error("Unable to read $displayName")
-                        existing.add(name)
-                        withContext(Dispatchers.Main) {
-                            queueItems.add(QueuedBook(name, output.length()))
-                            saveQueue()
-                        }
-                    }
-                }.onSuccess {
-                    queueMessage = "${uris.size} book${if (uris.size == 1) "" else "s"} optimized and queued"
-                }.onFailure { queueMessage = it.message ?: "Could not optimize selected books" }
-                queueBusy = false
-            }
-        }
+        queueEpubs(uris)
     }
     val darkColors = darkColorScheme(
         primary = androidx.compose.ui.graphics.Color(0xFFB8C7FF),
