@@ -41,6 +41,7 @@ import java.util.concurrent.TimeUnit
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
+import java.net.NetworkInterface
 import java.io.File
 
 data class ReaderFile(val name: String, val size: Long, val directory: Boolean)
@@ -137,7 +138,12 @@ class ReaderApi(
             socket.broadcast = true
             socket.soTimeout = 1500
             val payload = "hello".toByteArray()
-            socket.send(DatagramPacket(payload, payload.size, InetAddress.getByName("255.255.255.255"), 8134))
+            val destinations = linkedSetOf(InetAddress.getByName("255.255.255.255"))
+            NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()
+                .filter { it.isUp && !it.isLoopback }
+                .flatMap { it.interfaceAddresses }
+                .mapNotNullTo(destinations) { it.broadcast }
+            destinations.forEach { socket.send(DatagramPacket(payload, payload.size, it, 8134)) }
             val buffer = ByteArray(256)
             val packet = DatagramPacket(buffer, buffer.size)
             socket.receive(packet)
@@ -147,7 +153,7 @@ class ReaderApi(
 
     suspend fun list(baseUrl: String, path: String): List<ReaderFile> = withContext(Dispatchers.IO) {
         val url = baseUrl.trimEnd('/') + "/api/files?path=" + java.net.URLEncoder.encode(path, "UTF-8")
-        client.newCall(Request.Builder().url(url).build()).execute().use { response ->
+        client.newCall(Request.Builder().url(url).header("Connection", "close").build()).execute().use { response ->
             check(response.isSuccessful) { "Reader returned HTTP ${response.code}" }
             val json = JSONArray(response.body?.string() ?: "[]")
             buildList {
@@ -218,7 +224,7 @@ class ReaderApi(
             }
         }
         val url = baseUrl.trimEnd('/') + "/upload?path=" + java.net.URLEncoder.encode(path, "UTF-8")
-        val request = Request.Builder().url(url).post(
+        val request = Request.Builder().url(url).header("Connection", "close").post(
             MultipartBody.Builder().setType(MultipartBody.FORM)
                 .addFormDataPart("file", filename, body).build()
         ).build()
@@ -247,7 +253,7 @@ class ReaderApi(
                 }
             }
         }
-        val request = Request.Builder().url(baseUrl.trimEnd('/') + "/upload?path=" + java.net.URLEncoder.encode(path, "UTF-8")).post(
+        val request = Request.Builder().url(baseUrl.trimEnd('/') + "/upload?path=" + java.net.URLEncoder.encode(path, "UTF-8")).header("Connection", "close").post(
             MultipartBody.Builder().setType(MultipartBody.FORM).addFormDataPart("file", file.name, body).build()
         ).build()
         val call = client.newCall(request)

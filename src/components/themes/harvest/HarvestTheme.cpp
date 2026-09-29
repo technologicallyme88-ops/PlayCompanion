@@ -1,7 +1,7 @@
 #include "HarvestTheme.h"
 
-#include <GfxRenderer.h>
 #include <Bitmap.h>
+#include <GfxRenderer.h>
 #include <HalStorage.h>
 #include <Logging.h>
 
@@ -10,9 +10,9 @@
 #include <cstdio>
 #include <string_view>
 
-#include "apps_local/farm/FarmState.h"
 #include "CrossPointSettings.h"
 #include "RecentBooksStore.h"
+#include "apps_local/farm/FarmState.h"
 #include "components/UITheme.h"
 #include "components/icons/cover.h"
 
@@ -39,23 +39,23 @@ static constexpr CropSprite kSeedSprite = {
 
 static constexpr CropSprite kSproutSprite = {
     "................", "..####......##..", ".######....####..", "..######..#####.",
-    "....##########..", ".....########...", "......######....", ".....########...",
-    "....##....####..", "....#......###..", "....#.......#...", ".....#.....#....",
-    ".....#######....", "......#####.....", ".......##.......", "................",
+    "....##########..", ".....########...", "......######....",  ".....########...",
+    "....##....####..", "....#......###..", "....#.......#...",  ".....#.....#....",
+    ".....#######....", "......#####.....", ".......##.......",  "................",
 };
 
 static constexpr CropSprite kLeafySprite = {
-    "....##....##....", "...####..####...", "....##....##....", ".......##.......",
+    "....##....##....", "...####..####...",  "....##....##....", ".......##.......",
     "..##...####...##", ".####...##...####", "..##....##....##", "........##......",
-    "......####......", "....########....", "...##.####.##...", ".....######.....",
-    "......####......", ".......##.......", ".......##.......", "................",
+    "......####......", "....########....",  "...##.####.##...", ".....######.....",
+    "......####......", ".......##.......",  ".......##.......", "................",
 };
 
 static constexpr CropSprite kParsnipSprite = {
     "..###......###..", ".#####....#####..", "..#####..#####..", "....########....",
-    ".....######.....", "....########....", "...##########...", "...##......##...",
-    "..##........##..", "..##........##..", "...##......##...", "....########....",
-    ".....######.....", "......####......", ".......##.......", "................",
+    ".....######.....", "....########....",  "...##########...", "...##......##...",
+    "..##........##..", "..##........##..",  "...##......##...", "....########....",
+    ".....######.....", "......####......",  ".......##.......", "................",
 };
 
 void drawPlant(const GfxRenderer& renderer, const int cx, const int baseY, const int stage) {
@@ -89,12 +89,11 @@ bool drawPlantFromSd(const GfxRenderer& renderer, const int cx, const int baseY,
                      const farm::Plot& plot) {
   if (plot.cropId == 0 || plot.stage == 0) return false;
   char path[96]{};
-  std::snprintf(path, sizeof(path), "/.crosspoint/harvest/crops/%02u-%u-%s.bmp",
-                static_cast<unsigned>(plot.cropId), static_cast<unsigned>(plot.stage), branchSlug(plot.branch));
+  std::snprintf(path, sizeof(path), "/.crosspoint/harvest/crops/%02u-%u-%s.bmp", static_cast<unsigned>(plot.cropId),
+                static_cast<unsigned>(plot.stage), branchSlug(plot.branch));
   HalFile file;
   if (!Storage.openFileForRead("HARVEST", path, file)) {
-    std::snprintf(path, sizeof(path), "/.crosspoint/harvest/crops/stage-%u.bmp",
-                  static_cast<unsigned>(plot.stage));
+    std::snprintf(path, sizeof(path), "/.crosspoint/harvest/crops/stage-%u.bmp", static_cast<unsigned>(plot.stage));
     if (!Storage.openFileForRead("HARVEST", path, file)) return false;
   }
   Bitmap bitmap(file);
@@ -156,8 +155,8 @@ void HarvestTheme::drawRecentBookCover(GfxRenderer& renderer, const Rect rect,
                            false, false, Color::LightGray);
   renderer.fillRectDither(bubbleX, coverY, kCoverSelectionPadding, coverHeight, Color::LightGray);
   renderer.fillRectDither(coverX + harvestCoverWidth, coverY, kCoverSelectionPadding, coverHeight, Color::LightGray);
-  renderer.fillRoundedRect(bubbleX, coverY + coverHeight, bubbleWidth, kCoverSelectionPadding,
-                           kCoverSelectionRadius, false, false, true, true, Color::LightGray);
+  renderer.fillRoundedRect(bubbleX, coverY + coverHeight, bubbleWidth, kCoverSelectionPadding, kCoverSelectionRadius,
+                           false, false, true, true, Color::LightGray);
 }
 
 Rect HarvestTheme::getHomeFarmPlotRect(const Rect coverRect) const {
@@ -170,7 +169,7 @@ Rect HarvestTheme::getHomeFarmPlotRect(const Rect coverRect) const {
               coverRect.height - 24};
 }
 
-void HarvestTheme::drawHomeFarmPlot(const GfxRenderer& renderer, const Rect rect) const {
+void HarvestTheme::drawHomeFarmPlot(const GfxRenderer& renderer, const Rect rect, const bool selected) const {
   if (!SETTINGS.farmingEnabled || rect.width <= 0 || rect.height <= 0) return;
   renderer.fillRect(rect.x, rect.y, rect.width, rect.height, false);
   const int cell = std::max(1, std::min((rect.width - 12) / kColumns, (rect.height - 12) / kRows));
@@ -231,5 +230,17 @@ void HarvestTheme::drawHomeFarmPlot(const GfxRenderer& renderer, const Rect rect
         }
       }
     }
+  }
+
+  if (selected) {
+    const int bubbleX = rect.x - kCoverSelectionPadding;
+    const int bubbleY = rect.y - kCoverSelectionPadding;
+    const int bubbleWidth = rect.width + kCoverSelectionPadding * 2;
+    renderer.fillRoundedRect(bubbleX, bubbleY, bubbleWidth, kCoverSelectionPadding, kCoverSelectionRadius, true, true,
+                             false, false, Color::LightGray);
+    renderer.fillRectDither(bubbleX, rect.y, kCoverSelectionPadding, rect.height, Color::LightGray);
+    renderer.fillRectDither(rect.x + rect.width, rect.y, kCoverSelectionPadding, rect.height, Color::LightGray);
+    renderer.fillRoundedRect(bubbleX, rect.y + rect.height, bubbleWidth, kCoverSelectionPadding, kCoverSelectionRadius,
+                             false, false, true, true, Color::LightGray);
   }
 }

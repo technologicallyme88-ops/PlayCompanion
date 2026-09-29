@@ -718,15 +718,23 @@ void HomeActivity::showFarmMenu() {
 void HomeActivity::loop() {
   if (bookOptionsPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return;
 
-  const int menuCount = getMenuItemCount();
+  const int bookCount = static_cast<int>(recentBooks.size());
+  const bool farmFocusable = SETTINGS.uiTheme == CrossPointSettings::UI_THEME::HARVEST && SETTINGS.farmingEnabled;
+  const int farmSelectorIndex = bookCount;
+  const int farmOffset = farmFocusable ? 1 : 0;
+  const int menuCount = getMenuItemCount() + farmOffset;
   const auto& metrics = UITheme::getInstance().getMetrics();
 
-  auto activateSelection = [this] {
+  auto activateSelection = [this, bookCount, farmFocusable, farmSelectorIndex, farmOffset] {
     if (selectorIndex < recentBooks.size()) {
       onSelectBook(recentBooks[selectorIndex].path);
       return;
     }
-    const int menuIndex = selectorIndex - static_cast<int>(recentBooks.size());
+    if (farmFocusable && selectorIndex == farmSelectorIndex) {
+      showFarmMenu();
+      return;
+    }
+    const int menuIndex = selectorIndex - bookCount - farmOffset;
     switch (indexToMenuItem(menuIndex, hasOpdsServers)) {
       case HomeMenuItem::FILE_BROWSER:
         onFileBrowserOpen();
@@ -905,9 +913,11 @@ void HomeActivity::loop() {
 
   const int menuTop = metrics.homeTopPadding + metrics.homeCoverTileHeight + metrics.homeMenuTopOffset;
   const int renderedMenuSelection =
-      metrics.homeContinueReadingInMenu ? selectorIndex : selectorIndex - recentBooks.size();
-  const int renderedMenuCount =
-      menuCount - (metrics.homeContinueReadingInMenu ? 0 : static_cast<int>(recentBooks.size()));
+      selectorIndex == farmSelectorIndex && farmFocusable
+          ? -1
+          : (metrics.homeContinueReadingInMenu ? selectorIndex - (selectorIndex > farmSelectorIndex ? farmOffset : 0)
+                                               : selectorIndex - bookCount - farmOffset);
+  const int renderedMenuCount = menuCount - farmOffset - (metrics.homeContinueReadingInMenu ? 0 : bookCount);
   int menuRow = -1;
   // Row height from the theme, not the metrics table: RoundedRaff draws
   // font-derived rows and the touch grid must match the visuals exactly.
@@ -918,8 +928,7 @@ void HomeActivity::loop() {
   const auto menuTouch = mappedInput.rowTouch(menuRow, menuTop, menuRowHeight + metrics.menuSpacing, renderedMenuCount,
                                               0, menuTouchRight, menuRowHeight);
   if (menuTouch != MappedInputManager::RowTouch::None) {
-    const int touchedIndex =
-        metrics.homeContinueReadingInMenu ? menuRow : menuRow + static_cast<int>(recentBooks.size());
+    const int touchedIndex = (metrics.homeContinueReadingInMenu ? menuRow : menuRow + bookCount) + farmOffset;
     if (menuTouch == MappedInputManager::RowTouch::Down) {
       if (selectorIndex != touchedIndex) {
         selectorIndex = touchedIndex;
@@ -947,7 +956,7 @@ void HomeActivity::loop() {
                                             pokemonRight, menuRowHeight);
     if (touch != MappedInputManager::RowTouch::None) {
       const int menuIndex = upstreamMenuRows() + homeShelfFolderCount();
-      selectorIndex = static_cast<int>(recentBooks.size()) + menuIndex;
+      selectorIndex = bookCount + farmOffset + menuIndex;
       if (touch == MappedInputManager::RowTouch::Down)
         requestUpdate();
       else
@@ -1040,6 +1049,9 @@ void HomeActivity::render(RenderLock&&) {
   }
   const Rect coverRect{0, metrics.homeTopPadding, pageWidth, metrics.homeCoverTileHeight};
   farmPlotRect = GUI.getHomeFarmPlotRect(coverRect);
+  const bool farmFocusable = farmPlotRect.width > 0 && farmPlotRect.height > 0;
+  const int farmSelectorIndex = static_cast<int>(recentBooks.size());
+  const int farmOffset = farmFocusable ? 1 : 0;
   const auto labelAt = [&menuItems](int index) { return std::string(menuItems[index]); };
 
   // The theme decides where the companion goes and what gives up room for it.
@@ -1059,10 +1071,14 @@ void HomeActivity::render(RenderLock&&) {
   coverRectW = drawnCover.width;
   GUI.drawRecentBookCover(renderer, drawnCover, recentBooks, selectorIndex, coverRendered, coverBufferStored,
                           bufferRestored, std::bind(&HomeActivity::storeCoverBuffer, this));
-  GUI.drawHomeFarmPlot(renderer, farmPlotRect);
+  GUI.drawHomeFarmPlot(renderer, farmPlotRect, farmFocusable && selectorIndex == farmSelectorIndex);
 
   const int renderedSelection =
-      metrics.homeContinueReadingInMenu ? selectorIndex : selectorIndex - static_cast<int>(recentBooks.size());
+      farmFocusable && selectorIndex == farmSelectorIndex
+          ? -1
+          : (metrics.homeContinueReadingInMenu
+                 ? selectorIndex - (farmFocusable && selectorIndex > farmSelectorIndex ? farmOffset : 0)
+                 : selectorIndex - static_cast<int>(recentBooks.size()) - farmOffset);
   if (buttonPokemonMenu) {
     // Measure without the theme's own page clamp, then hand every theme one
     // page. In particular, Classic and Lyra do not scroll their Home rows.
@@ -1095,7 +1111,7 @@ void HomeActivity::render(RenderLock&&) {
     Rect pokemonRect{pokemonX, menuRect.y + pokemonRenderedRow * rowStep, std::max(0, pokemonRight - pokemonX),
                      GUI.getMenuRowHeight(renderer)};
     const int pokemonMenuIndex = upstreamMenuRows() + homeShelfFolderCount();
-    const int pokemonSelectorIndex = static_cast<int>(recentBooks.size()) + pokemonMenuIndex;
+    const int pokemonSelectorIndex = static_cast<int>(recentBooks.size()) + farmOffset + pokemonMenuIndex;
     GUI.drawButtonMenu(
         renderer, pokemonRect, 1, selectorIndex == pokemonSelectorIndex ? 0 : -1,
         [](int) { return std::string(tr(STR_POKEMON)); }, [](int) { return Pokemon; });

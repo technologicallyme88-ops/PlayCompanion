@@ -108,35 +108,18 @@ jobs:
           # new in CrossPlay". A release note is a thing you write.
           generate_release_notes: false
           body: |
-            ## Added
-
-            - Harvest UI theme with an interactive four-plot farm.
-            - Seasonal seeds, crop growth stages, branching Standard, Scholar
-              and Wild harvests, crop care, selling and progressive plot unlocks.
-            - Farm Shop, Daily Quests and a discovery-based Herbarium.
-            - Farm care and completed-quest notifications on Home and while reading.
-            - Farming and Companion display controls in Settings.
-            - Pokédex caught count (`caught / 151`).
-
             ## Improved
 
-            - Farm Home preview and dedicated pages for seeds, harvesting,
-              selling, care, upgrades, quests and Herbarium entries.
-            - Buy Seeds shows the current Coin balance and crop growth time.
-            - Herbarium entries show each crop's season and growth time.
-            - Farm overview spacing and selected-plot information.
-            - Dark mode now applies throughout the reader and menus.
-            - PC Box selection remains in place after withdrawing or releasing
-              a Pokémon.
+            - X3 and X4 button navigation can select and open the Home farm preview.
+            - The selected farm preview now matches the book's dithered focus bubble.
+            - Buy Seeds uses the shorter `Bag` inventory label.
+            - Android Find checks active-network broadcast addresses for more reliable
+              reader discovery on phone hotspots.
 
             ## Fixed
 
-            - Empty Buy Seeds rows and incomplete page refresh artifacts.
-            - Overlapping Care feedback and Herbarium headings.
-            - Harvest now explains when no crop is ready.
-            - New farms begin with one empty plot and enough Coins for one seed.
-            - Reading-page and Speedy Reader quest progress now survives daily
-              quest initialization.
+            - Android uploads no longer reuse the reader connection before refreshing
+              the file list, avoiding the harmless hexadecimal/chunk parsing warning.
 
             ## Firmware files
 

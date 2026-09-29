@@ -274,7 +274,7 @@ class BaseTheme {
                                                      const std::function<std::string(int index)>& buttonLabel,
                                                      int hintsTop) const;
   virtual Rect getHomeFarmPlotRect(Rect coverRect) const;
-  virtual void drawHomeFarmPlot(const GfxRenderer& renderer, Rect rect) const;
+  virtual void drawHomeFarmPlot(const GfxRenderer& renderer, Rect rect, bool selected = false) const;
   virtual int getListRowStep(bool hasSubtitle) const;
   virtual int getListPageItems(int contentHeight, bool hasSubtitle) const;
   virtual void drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,

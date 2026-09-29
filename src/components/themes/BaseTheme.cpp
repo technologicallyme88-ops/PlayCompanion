@@ -894,7 +894,7 @@ HomeCompanionLayout BaseTheme::getHomeCompanionLayout(const GfxRenderer& rendere
 
 Rect BaseTheme::getHomeFarmPlotRect(const Rect) const { return {}; }
 
-void BaseTheme::drawHomeFarmPlot(const GfxRenderer&, const Rect) const {}
+void BaseTheme::drawHomeFarmPlot(const GfxRenderer&, const Rect, const bool) const {}
 
 void BaseTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                                const std::function<std::string(int index)>& buttonLabel,

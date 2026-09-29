@@ -16,7 +16,7 @@ val hasReleaseSigning = listOf(
 ).all { !it.isNullOrBlank() }
 
 android { namespace = "org.playcompanion.app"; compileSdk = 35
-    defaultConfig { applicationId = "org.playcompanion.app"; minSdk = 26; targetSdk = 35; versionCode = 4; versionName = "1.5.3" }
+    defaultConfig { applicationId = "org.playcompanion.app"; minSdk = 26; targetSdk = 35; versionCode = 5; versionName = "1.5.5" }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
