@@ -32,6 +32,19 @@ const char* speciesName(const uint16_t id) {
   return species == nullptr ? "???" : species->name;
 }
 
+uint16_t caughtSpeciesCount(const pokemon::PokemonState& state) {
+  uint16_t count = 0;
+  for (uint16_t speciesId = 1; speciesId <= pokemon::KANTO_SPECIES_COUNT; ++speciesId) {
+    if (pokemon::isSpeciesMarked(state.caughtSpecies, speciesId)) count++;
+  }
+  return count;
+}
+
+int retainedPcSelection(const pokemon::PokemonSnapshot& snapshot, const int previousSelection) {
+  const int pcCount = static_cast<int>(snapshot.ownedCount) - static_cast<int>(snapshot.partyCount);
+  return std::max(0, std::min(previousSelection, pcCount - 1));
+}
+
 const char* genderText(const pokemon::Gender gender) {
   if (gender == pokemon::Gender::Male) return tr(STR_POKEMON_MALE);
   if (gender == pokemon::Gender::Female) return tr(STR_POKEMON_FEMALE);
@@ -358,7 +371,9 @@ void PokemonActivity::activate() {
             showMessage(tr(STR_POKEMON_SAVE_ERROR), actionSource_);
           else {
             if (!refreshSnapshot()) return;
-            setScreen(actionSource_);
+            const int selection = actionSource_ == Screen::Pc ? retainedPcSelection(snapshot_, actionSourceSelection_)
+                                                              : actionSourceSelection_;
+            setScreen(actionSource_, selection);
           }
           return;
         }
@@ -411,7 +426,7 @@ void PokemonActivity::activate() {
       } else {
         focusedRecordId_ = 0;
         if (!refreshSnapshot()) return;
-        setScreen(Screen::Pc);
+        setScreen(Screen::Pc, retainedPcSelection(snapshot_, actionSourceSelection_));
       }
       return;
     case Screen::PcOrder:
@@ -1128,16 +1143,32 @@ void PokemonActivity::renderHeaderAndHints() {
   else if (screen_ == Screen::Summary || screen_ == Screen::Actions)
     title = tr(STR_POKEMON_SUMMARY);
   const Rect header = TouchHeaderBackButton::headerRect(renderer, mappedInput);
-  if (mappedInput.hasTouch())
-    TouchHeaderBackButton::draw(renderer, uiTarget_, header, title, false);
-  else {
+  char pokedexCount[16]{};
+  int pokedexCountWidth = 0;
+  if (screen_ == Screen::Pokedex) {
+    snprintf(pokedexCount, sizeof(pokedexCount), "%u / %u", caughtSpeciesCount(snapshot_.state),
+             pokemon::KANTO_SPECIES_COUNT);
+    pokedexCountWidth = renderer.getTextWidth(UI_10_FONT_ID, pokedexCount, EpdFontFamily::BOLD);
+  }
+  int titleY = 0;
+  if (mappedInput.hasTouch()) {
+    const int reserve = pokedexCountWidth > 0 ? pokedexCountWidth + metrics.headerSidePadding * 2 : 0;
+    TouchHeaderBackButton::draw(renderer, uiTarget_, header, title, false, reserve);
+    const auto layout = TouchHeaderBackButton::layout(header);
+    titleY = layout.iconRect.y + TouchHeaderBackButton::TITLE_VERTICAL_OFFSET +
+             std::max(0, (layout.iconRect.height - renderer.getLineHeight(UI_10_FONT_ID)) / 2);
+  } else {
     // Let the theme draw its rule and battery, then place the title ourselves.
     // Some X3 font builds extend below their reported line cell; the standard
     // bottom-aligned title can therefore collide with the header rule.
     GUI.drawHeader(renderer, header, "");
     constexpr int titleRuleGap = 18;
-    const int titleY = header.y + std::max(0, header.height - renderer.getLineHeight(UI_12_FONT_ID) - titleRuleGap);
+    titleY = header.y + std::max(0, header.height - renderer.getLineHeight(UI_12_FONT_ID) - titleRuleGap);
     renderer.drawText(UI_12_FONT_ID, header.x + metrics.headerSidePadding, titleY, title, true, EpdFontFamily::BOLD);
+  }
+  if (pokedexCountWidth > 0) {
+    renderer.drawText(UI_10_FONT_ID, header.x + header.width - metrics.headerSidePadding - pokedexCountWidth, titleY,
+                      pokedexCount, true, EpdFontFamily::BOLD);
   }
   const char* confirm = screen_ == Screen::Summary   ? tr(STR_POKEMON_ACTIONS)
                         : screen_ == Screen::Message ? tr(STR_OK)

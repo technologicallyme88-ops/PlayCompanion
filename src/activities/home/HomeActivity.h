@@ -30,7 +30,6 @@ class HomeActivity final : public Activity {
   int coverRectH = 0;
   std::vector<RecentBook> recentBooks;
   OptionPopup bookOptionsPopup;
-  OptionPopup farmOptionsPopup;
   Rect farmPlotRect;
   const HomeMenuItem initialMenuItem;
 
@@ -82,6 +81,7 @@ class HomeActivity final : public Activity {
   // Stacked fallback for a region taller than it is wide: a column beside the
   // menu rather than a strip beneath it.
   void drawCompanionColumn(Rect region, const char* label, const char* sub, const char* quote) const;
+  void showFarmMenu();
   void onSelectBook(const std::string& path);
   void onFileBrowserOpen();
   void onJournalOpen();
@@ -95,9 +95,9 @@ class HomeActivity final : public Activity {
 
   int getMenuItemCount() const;
   int upstreamMenuRows() const;  // stock home rows before CrossPlay shelf folders
-  bool storeCoverBuffer();    // Store frame buffer for cover image
-  bool restoreCoverBuffer();  // Restore frame buffer from stored cover
-  void freeCoverBuffer();     // Free the stored cover buffer
+  bool storeCoverBuffer();       // Store frame buffer for cover image
+  bool restoreCoverBuffer();     // Restore frame buffer from stored cover
+  void freeCoverBuffer();        // Free the stored cover buffer
   void loadRecentBooks(int maxBooks);
   void loadRecentCovers(int coverHeight);
 

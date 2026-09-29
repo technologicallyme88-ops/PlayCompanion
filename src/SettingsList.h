@@ -203,7 +203,7 @@ inline std::vector<StrId> buildLongPressMenuValues() {
 // .grid file surfaces a new choice with no change here.
 inline SettingInfo buildCompanionCharacterSetting() {
   SettingInfo s;
-  s.nameId = StrId::STR_COMPANION_CHARACTER;
+  s.nameId = StrId::STR_COMPANION_CHARACTER_NESTED;
   s.type = SettingType::ENUM;
   s.valuePtr = &CrossPointSettings::companionId;
   s.key = "companionId";
@@ -276,7 +276,7 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
             "refreshFrequency", StrId::STR_CAT_DISPLAY),
         SettingInfo::Enum(StrId::STR_UI_THEME, &CrossPointSettings::uiTheme,
                           {StrId::STR_THEME_CLASSIC, StrId::STR_THEME_LYRA, StrId::STR_THEME_LYRA_EXTENDED,
-                           StrId::STR_THEME_ROUNDEDRAFF},
+                           StrId::STR_THEME_ROUNDEDRAFF, StrId::STR_THEME_HARVEST},
                           "uiTheme", StrId::STR_CAT_DISPLAY),
         SettingInfo::Toggle(StrId::STR_SUNLIGHT_FADING_FIX, &CrossPointSettings::fadingFix, "fadingFix",
                             StrId::STR_CAT_DISPLAY),
@@ -292,7 +292,7 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
         // Character names are proper nouns, identical in every UI language, so
         // they come from the generated sprite table rather than the string table.
         buildCompanionCharacterSetting(),
-        SettingInfo::Toggle(StrId::STR_COMPANION_ON_HOME, &CrossPointSettings::companionOnHome, "companionOnHome",
+        SettingInfo::Toggle(StrId::STR_FARMING_ENABLED, &CrossPointSettings::farmingEnabled, "farmingEnabled",
                             StrId::STR_CAT_DISPLAY),
 
         // --- Reader ---
@@ -341,7 +341,7 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
         SettingInfo::Enum(StrId::STR_IMAGES, &CrossPointSettings::imageRendering,
                           {StrId::STR_IMAGES_DISPLAY, StrId::STR_IMAGES_PLACEHOLDER, StrId::STR_IMAGES_SUPPRESS},
                           "imageRendering", StrId::STR_CAT_READER),
-        // Night mode = inverted output polarity on the reading surfaces only
+        // Night mode = inverted output polarity throughout the interface.
         // (EPUB/TXT/XTC; ActivityManager resolves the polarity per render).
         // Reader category, since it does not affect the rest of the UI.
         SettingInfo::Toggle(StrId::STR_NIGHT_MODE, &CrossPointSettings::screenInverted, "screenInverted",
@@ -516,7 +516,7 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
   // each settings-list request so Party -> Move immediately changes the label.
   {
     auto it = std::find_if(v.begin(), v.end(),
-                           [](const SettingInfo& s) { return s.nameId == StrId::STR_COMPANION_CHARACTER; });
+                           [](const SettingInfo& s) { return s.nameId == StrId::STR_COMPANION_CHARACTER_NESTED; });
     if (it != v.end()) {
       const size_t pokemonIndex = static_cast<size_t>(companion::CompanionId::Pokemon);
       if (pokemonIndex < it->enumStringValues.size()) {

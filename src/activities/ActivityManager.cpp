@@ -69,10 +69,10 @@ void ActivityManager::renderTaskLoop() {
     RenderLock lock;
     if (currentActivity) {
       HalPowerManager::Lock powerLock;  // Ensure we don't go into low-power mode while rendering
-      // Night mode inverts only the reading surfaces (appliesNightMode):
-      // resolving the output polarity here, per render, means menus, popups,
-      // and every other activity revert to normal automatically.
-      display.setInverted(SETTINGS.screenInverted != 0 && currentActivity->appliesNightMode());
+      // Night mode is a display-wide preference: resolve the output polarity
+      // before every activity render so Home, menus, popups, and readers all
+      // use the same presentation immediately after the setting changes.
+      display.setInverted(SETTINGS.screenInverted != 0);
       currentActivity->render(std::move(lock));
     }
     // Notify any task blocked in requestUpdateAndWait() that the render is done.

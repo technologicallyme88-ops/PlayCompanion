@@ -14,8 +14,9 @@
 #include "SdCardFontSystem.h"
 #include "TxtReaderActivity.h"
 #include "XtcReaderActivity.h"
-#include "companion/CompanionTracker.h"
+#include "apps_local/farm/FarmState.h"
 #include "apps_local/journal/ReadingJournal.h"
+#include "companion/CompanionTracker.h"
 #if defined(CROSSINK_ENABLE_POKEMON)
 #include "pokemon/PokemonService.h"
 #endif
@@ -89,6 +90,8 @@ void ReaderActivity::onExit() {
   Activity::onExit();
 
   COMPANION.endSession();
+  FARM_STATE.finishReadingSession(farmSessionPages);
+  if (!FARM_STATE.saveToFile()) LOG_ERR("FARM", "Failed to save reading rewards");
 #if defined(CROSSINK_ENABLE_POKEMON)
   pokemon::devicePokemonService().flushOnExit(static_cast<uint32_t>(millis()));
 #endif
@@ -103,7 +106,15 @@ void ReaderActivity::onExit() {
 
 bool ReaderActivity::pageTurnTracked(const bool isForward) {
   const bool turned = pageTurn(isForward);
-  if (turned) COMPANION.onPageTurn();
+  if (turned) {
+    COMPANION.onPageTurn();
+    FARM_STATE.onPageTurn();
+    farmSessionPages++;
+    if (isForward && isAtEndOfBook() && !farmFinishRecorded) {
+      FARM_STATE.onBookFinished();
+      farmFinishRecorded = true;
+    }
+  }
   return turned;
 }
 
@@ -111,7 +122,11 @@ bool ReaderActivity::skipPagesTracked(const int amount) {
   const bool turned = skipPages(amount);
   // A successful fast navigation is evidence that the reader is active, but it
   // counts as one navigation event rather than pretending ten pages were read.
-  if (turned) COMPANION.onPageTurn();
+  if (turned) {
+    COMPANION.onPageTurn();
+    FARM_STATE.onPageTurn();
+    farmSessionPages++;
+  }
   return turned;
 }
 

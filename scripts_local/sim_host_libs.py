@@ -21,6 +21,12 @@ import sys
 
 Import("env")  # noqa: F821  (SCons injects this)
 
+# GCC 15 defaults C compilation to C23, where `bool`, `true`, and `false` are
+# keywords. The pinned QRCode C library provides its own definitions and is
+# valid under the C standard used by the device toolchain, so keep native C
+# sources on GNU C11. CFLAGS does not affect the C++20 firmware sources.
+env.Append(CFLAGS=["-std=gnu11"])  # noqa: F821
+
 if sys.platform.startswith("linux"):
     env.Append(LIBS=["crypto"])  # noqa: F821
     print("[sim-host-libs] linking libcrypto for the simulator's MD5Builder")

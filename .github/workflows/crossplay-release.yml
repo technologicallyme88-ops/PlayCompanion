@@ -108,62 +108,39 @@ jobs:
           # new in CrossPlay". A release note is a thing you write.
           generate_release_notes: false
           body: |
-            Games and small tools for the **Xteink X4 Pro**, on top of
-            [CrossPoint](https://crosspointreader.com/). Fourteen games --
-            Chess, Checkers, Connect Four, Yahtzee, Knucklebones, Minesweeper,
-            Battleship, Connections, Solitaire, D&Diagrams, Insider, Jaipur,
-            Murdle and Sea Salt & Paper -- plus spaced-repetition flashcards,
-            Hacker News and the xkcd archive. Eight of them play over **PLAY
-            NEARBY**: Chess, Checkers, Connect Four, Yahtzee, Knucklebones,
-            Battleship, Jaipur and Sea Salt. Two devices next to each other
-            find one another with nothing to type.
+            ## Added
 
-            ### Which file to download
+            - Harvest UI theme with an interactive four-plot farm.
+            - Seasonal seeds, crop growth stages, branching Standard, Scholar
+              and Wild harvests, crop care, selling and progressive plot unlocks.
+            - Farm Shop, Daily Quests and a discovery-based Herbarium.
+            - Farm care and completed-quest notifications on Home and while reading.
+            - Farming and Companion display controls in Settings.
+            - Pokédex caught count (`caught / 151`).
 
-            **`crossplay-<version>-x4pro-full.bin`** is the one to flash over
-            USB. It is the whole firmware -- bootloader, partition table and
-            application in one image -- so it installs on a device that has
-            never run CrossPoint.
+            ## Improved
 
-            **`firmware.bin`** is the application on its own, for a device that
-            is already running this. Settings -> Check for updates fetches it
-            over Wi-Fi, or you can copy it to the SD card and pick it there.
-            Keep that filename: the updater matches it exactly.
+            - Farm Home preview and dedicated pages for seeds, harvesting,
+              selling, care, upgrades, quests and Herbarium entries.
+            - Buy Seeds shows the current Coin balance and crop growth time.
+            - Herbarium entries show each crop's season and growth time.
+            - Farm overview spacing and selected-plot information.
+            - Dark mode now applies throughout the reader and menus.
+            - PC Box selection remains in place after withdrawing or releasing
+              a Pokémon.
 
-            v1.0.0 and v1.0.1 published only the application image and told you
-            to write it to `0x0`, which on an ESP32-S3 is where the bootloader
-            lives. Do not follow the install steps from those two releases.
+            ## Fixed
 
-            Try the whole thing in a browser first, without owning one:
-            **[crossplay.ma-r-s.com](https://crossplay.ma-r-s.com)** runs this
-            same firmware compiled to WebAssembly.
+            - Empty Buy Seeds rows and incomplete page refresh artifacts.
+            - Overlapping Care feedback and Herbarium headings.
+            - Harvest now explains when no crop is ready.
+            - New farms begin with one empty plot and enough Coins for one seed.
+            - Reading-page and Speedy Reader quest progress now survives daily
+              quest initialization.
 
-            ### Before you flash this
+            ## Firmware files
 
-            **No one has run this build on a physical device.** It is developed
-            against a simulator and a browser build of the same sources, and the
-            author does not have an X4 Pro. The host test suites pass and both
-            firmware targets compile, but "compiles and passes tests" is not
-            "known to boot". You are the hardware test. If it does not work,
-            please [open an issue](https://github.com/ma-r-s/crossplay/issues)
-            and say what happened.
-
-            **The X4 Pro only.** The X4 and X3 are ESP32-C3; this is an S3.
-            Flashing it there is a cross-chip flash. Install
-            [CrossPoint](https://crosspointreader.com/) on those instead.
-
-            **Flashing replaces the firmware, not the SD card.** Your library,
-            your reading positions and your fonts are files on that card and are
-            left alone. Installing stock CrossPoint over the top puts the device
-            back where it was, which is what makes this cheap to try. If a flash
-            goes wrong,
-            [docs/fix-bricked-xteink.md](https://github.com/ma-r-s/crossplay/blob/xteink/docs/fix-bricked-xteink.md)
-            is the way back.
-
-            Full install steps are in the
-            [README](https://github.com/ma-r-s/crossplay#install-it). The short
-            version, once `pip install esptool` has run:
-
-            ```
-            esptool.py --chip esp32s3 --baud 921600 write_flash 0x0 crossplay-<version>-x4pro-full.bin
-            ```
+            - `firmware-pro.bin`: X4 Pro update image
+            - `firmware-x4.bin`: X4 update image
+            - `firmware-x3.bin`: X3 update image
+            - `crossplay-<version>-x4pro-full.bin`: X4 Pro complete USB image

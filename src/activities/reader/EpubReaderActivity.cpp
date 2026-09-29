@@ -36,6 +36,7 @@
 #include "RecentBooksStore.h"
 #include "SdCardFontSystem.h"
 #include "activities/settings/TextSettingsActivity.h"
+#include "apps_local/farm/FarmState.h"
 #include "companion/CompanionTracker.h"
 #include "components/UITheme.h"
 #if defined(CROSSINK_ENABLE_POKEMON)
@@ -162,16 +163,18 @@ void moveFinishedBookToReadFolder(const std::string& srcPath, const std::string&
 
 }  // namespace
 
-#if defined(CROSSINK_ENABLE_POKEMON)
 namespace {
+#if defined(CROSSINK_ENABLE_POKEMON)
 bool pokemonEncounterPendingNow() {
   pokemon::PokemonDashboardSnapshot snapshot{};
   return pokemon::devicePokemonService().loadDashboardSnapshot(snapshot) == pokemon::ServiceStatus::Ok &&
          snapshot.pending.kind != pokemon::PendingEventKind::None;
 }
+#endif
 
-void drawReaderEncounterBadge(const GfxRenderer& renderer, const CrossPointSettings::StatusBarSpec& sb,
-                              const float bookProgress, const int currentPage, const int pageCount) {
+void drawReaderNotificationBadge(const GfxRenderer& renderer, const CrossPointSettings::StatusBarSpec& sb,
+                                 const float bookProgress, const int currentPage, const int pageCount,
+                                 const int position, const char glyph) {
   constexpr int BOX = 15;
   constexpr int GAP = 5;
 
@@ -199,7 +202,7 @@ void drawReaderEncounterBadge(const GfxRenderer& renderer, const CrossPointSetti
   }
 
   const int progressWidth = renderer.getTextWidth(SMALL_FONT_ID, progressText);
-  int x = screenW - metrics.contentSidePadding - progressWidth - GAP - BOX;
+  int x = screenW - metrics.contentSidePadding - progressWidth - GAP - BOX - position * (BOX + GAP);
   x = std::max(metrics.contentSidePadding, x);
 
   // User's reader status bar is configured at the bottom. Center the badge in
@@ -217,11 +220,16 @@ void drawReaderEncounterBadge(const GfxRenderer& renderer, const CrossPointSetti
   renderer.drawLine(x + BOX - 4, y + BOX - 1, x + BOX - 2, y + BOX - 3, true);
 
   const int cx = x + BOX / 2;
-  renderer.fillRect(cx - 1, y + 3, 3, 6, true);
-  renderer.fillRect(cx - 1, y + 11, 3, 3, true);
+  if (glyph == '!') {
+    renderer.fillRect(cx - 1, y + 3, 3, 6, true);
+    renderer.fillRect(cx - 1, y + 11, 3, 3, true);
+  } else {
+    renderer.fillRect(x + 3, y + 3, 2, 10, true);
+    renderer.fillRect(x + 3, y + 3, 7, 2, true);
+    renderer.fillRect(x + 3, y + 7, 5, 2, true);
+  }
 }
 }  // namespace
-#endif
 
 EpubReaderActivity::~EpubReaderActivity() {
   ImageBlock::setExtractor(nullptr, nullptr);
@@ -907,8 +915,7 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
       if (journalFinishRecorded && epub) {
         auto journalActivity = makeUniqueNoThrow<ReadingJournalActivity>(renderer, mappedInput, epub->getPath());
         if (journalActivity)
-          startActivityForResult(std::move(journalActivity),
-                                 [this](const ActivityResult&) { openReaderMenu(); });
+          startActivityForResult(std::move(journalActivity), [this](const ActivityResult&) { openReaderMenu(); });
         else {
           LOG_ERR("ERS", "OOM: ReadingJournalActivity");
           openReaderMenu();
@@ -1762,11 +1769,15 @@ void EpubReaderActivity::renderStatusBar() const {
 
   GUI.drawStatusBar(renderer, bookProgress, currentPage, pageCount, title, 0, textYOffset, true, currentPageBookmarked,
                     section ? section->isBuilding() : false);
+  int notificationPosition = 0;
 #if defined(CROSSINK_ENABLE_POKEMON)
   if (pokemonEncounterPending && sb.showChapterPageCount) {
-    drawReaderEncounterBadge(renderer, sb, bookProgress, currentPage, pageCount);
+    drawReaderNotificationBadge(renderer, sb, bookProgress, currentPage, pageCount, notificationPosition++, '!');
   }
 #endif
+  if (FARM_STATE.hasFarmNotification() && sb.showChapterPageCount) {
+    drawReaderNotificationBadge(renderer, sb, bookProgress, currentPage, pageCount, notificationPosition, 'F');
+  }
 }
 
 void EpubReaderActivity::navigateToHref(const std::string& hrefStr, const bool savePosition) {

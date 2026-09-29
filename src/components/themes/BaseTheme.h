@@ -125,8 +125,24 @@ struct ThemeMetrics {
   int textFieldLineEndOffset;
 };
 
-enum UIIcon { None = 0, Folder, Text, Image, Book, File, Recent, Settings, Transfer, Library, Wifi, Hotspot, Bookmark,
-              Games, Apps, Pokemon };
+enum UIIcon {
+  None = 0,
+  Folder,
+  Text,
+  Image,
+  Book,
+  File,
+  Recent,
+  Settings,
+  Transfer,
+  Library,
+  Wifi,
+  Hotspot,
+  Bookmark,
+  Games,
+  Apps,
+  Pokemon
+};
 
 // Default theme implementation (Classic Theme)
 // Additional themes can inherit from this and override methods as needed
@@ -257,6 +273,8 @@ class BaseTheme {
                                                      int buttonCount,
                                                      const std::function<std::string(int index)>& buttonLabel,
                                                      int hintsTop) const;
+  virtual Rect getHomeFarmPlotRect(Rect coverRect) const;
+  virtual void drawHomeFarmPlot(const GfxRenderer& renderer, Rect rect) const;
   virtual int getListRowStep(bool hasSubtitle) const;
   virtual int getListPageItems(int contentHeight, bool hasSubtitle) const;
   virtual void drawList(const GfxRenderer& renderer, Rect rect, int itemCount, int selectedIndex,

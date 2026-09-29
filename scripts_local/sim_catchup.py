@@ -6,6 +6,7 @@ and two things main.cpp uses are missing from the simulator's stubs:
 
   * BoardConfig::BoardProfile has no `input` member
   * Arduino.h does not declare digitalRead / digitalWrite
+  * HalClock lacks the UTC field accessor used by current firmware
 
 Header stubs in sim-stubs/ cannot fix these: a library's own include path wins
 over the project's -I, so its BoardConfig.h and Arduino.h always shadow ours.
@@ -86,6 +87,16 @@ patch(
     marker="openFileForUpdate",
 )
 
+patch(
+    src / "HalStorage.h",
+    "  bool ready() const;",
+    "  bool ready() const;\n"
+    "  uint64_t totalBytes() const;\n"
+    "  uint64_t usedBytes();",
+    "HalStorage capacity queries (header)",
+    marker="totalBytes() const",
+)
+
 
 patch(
     src / "HalStorage.cpp",
@@ -115,6 +126,36 @@ patch(
     "std::vector<String> HalStorage::listFiles(",
     "HalStorage::openFileForUpdate (implementation)",
     marker="HalStorage::openFileForUpdate(",
+)
+
+patch(
+    src / "HalStorage.cpp",
+    "#include <sys/stat.h>",
+    "#include <sys/stat.h>\n#include <sys/statvfs.h>",
+    "HalStorage capacity queries (statvfs include)",
+    marker="<sys/statvfs.h>",
+)
+
+patch(
+    src / "HalStorage.cpp",
+    "bool HalStorage::begin() {",
+    "uint64_t HalStorage::totalBytes() const {\n"
+    "  struct statvfs stats {};\n"
+    "  const std::string root = configuredStorageRoot();\n"
+    "  if (::statvfs(root.c_str(), &stats) != 0) return 0;\n"
+    "  return static_cast<uint64_t>(stats.f_blocks) * stats.f_frsize;\n"
+    "}\n"
+    "\n"
+    "uint64_t HalStorage::usedBytes() {\n"
+    "  struct statvfs stats {};\n"
+    "  const std::string root = configuredStorageRoot();\n"
+    "  if (::statvfs(root.c_str(), &stats) != 0) return 0;\n"
+    "  return static_cast<uint64_t>(stats.f_blocks - stats.f_bfree) * stats.f_frsize;\n"
+    "}\n"
+    "\n"
+    "bool HalStorage::begin() {",
+    "HalStorage capacity queries (implementation)",
+    marker="HalStorage::totalBytes() const",
 )
 
 patch(
@@ -194,4 +235,27 @@ patch(
     "  static constexpr unsigned long IDLE_DOWNCLOCK_MS = 500;",
     "HalPowerManager::IDLE_POWER_SAVING_MS (mirrors lib/hal)",
     marker="IDLE_POWER_SAVING_MS",
+)
+
+patch(
+    src / "HalGPIO.h",
+    "  bool verifyPowerButtonWakeup();",
+    "  bool verifyPowerButtonWakeup();\n"
+    "  bool verifyPowerButtonWakeup(uint16_t, bool) { return verifyPowerButtonWakeup(); }",
+    "HalGPIO::verifyPowerButtonWakeup arguments (compatibility overload)",
+    marker="verifyPowerButtonWakeup(uint16_t",
+)
+
+# Current firmware asks HalClock for UTC calendar fields. The simulator's host
+# clock already supplies the same five fields through its older getDateTime()
+# name, so keep the compatibility alias beside that declaration.
+patch(
+    src / "HalClock.h",
+    "  bool getDateTime(uint16_t& year, uint8_t& month, uint8_t& day, uint8_t& hour, uint8_t& minute) const;",
+    "  bool getDateTime(uint16_t& year, uint8_t& month, uint8_t& day, uint8_t& hour, uint8_t& minute) const;\n"
+    "  bool getUtcDateTime(uint16_t& year, uint8_t& month, uint8_t& day, uint8_t& hour, uint8_t& minute) const {\n"
+    "    return getDateTime(year, month, day, hour, minute);\n"
+    "  }",
+    "HalClock::getUtcDateTime (compatibility alias)",
+    marker="getUtcDateTime",
 )

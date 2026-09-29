@@ -9,13 +9,14 @@
 #include <cstdio>
 #include <cstring>
 
-#include "ButtonRemapActivity.h"
 #include "BluetoothSettingsActivity.h"
+#include "ButtonRemapActivity.h"
 #include "ClearCacheActivity.h"
-#include "CrossPointSettings.h"
+#include "CrossPointSettings.h"
+
 #if defined(CROSSINK_ENABLE_POKEMON)
-#include "pokemon/PokemonCompanionBridge.h"
 #include "companion/CompanionSprites.generated.h"
+#include "pokemon/PokemonCompanionBridge.h"
 #endif
 #if defined(CROSSINK_ENABLE_POKEMON)
 #include "companion/CompanionSprites.generated.h"
@@ -173,6 +174,11 @@ void SettingsActivity::rebuildRowItems() {
   for (size_t i = 0; i < settings.size(); i++) {
     fui::ListItem item;
     item.label = settings[i].rawName ? settings[i].rawName : I18N.get(settings[i].nameId);
+    if (settings[i].nameId == StrId::STR_COMPANION_ENABLED) {
+      item.joinsNext = true;
+    } else if (settings[i].nameId == StrId::STR_COMPANION_CHARACTER_NESTED) {
+      item.joinsPrevious = true;
+    }
     item.actionValue = static_cast<int16_t>(i);
     rowItems_.push_back(item);
   }
@@ -291,15 +297,13 @@ void SettingsActivity::toggleCurrentSetting() {
 #if defined(CROSSINK_ENABLE_POKEMON)
         /* Stage 3C.4 NVS COMPANION SELECT */
         if (valuePtr == &CrossPointSettings::companionId) {
-          pokemon::setPokemonCompanionSelectedPersistent(
-              idx == static_cast<int>(companion::CompanionId::Pokemon));
+          pokemon::setPokemonCompanionSelectedPersistent(idx == static_cast<int>(companion::CompanionId::Pokemon));
         }
 #endif
 #if defined(CROSSINK_ENABLE_POKEMON)
         /* Stage 3C.3 POKEMON FLAG SELECT */
         if (valuePtr == &CrossPointSettings::companionId) {
-          SETTINGS.pokemonCompanionSelected =
-              idx == static_cast<int>(companion::CompanionId::Pokemon) ? 1 : 0;
+          SETTINGS.pokemonCompanionSelected = idx == static_cast<int>(companion::CompanionId::Pokemon) ? 1 : 0;
         }
 #endif
         syncQuickResumeTimeoutForSleepScreen(sleepScreenChanged, quickResumeTimeoutChanged);
@@ -472,6 +476,9 @@ std::string SettingsActivity::settingValueText(const SettingInfo& setting) {
     // Guard like the valueGetter branch below: a corrupt/migrated settings
     // byte must not index past the enum table.
     const uint8_t value = SETTINGS.*(setting.valuePtr);
+    if (!setting.enumStringValues.empty() && value < setting.enumStringValues.size()) {
+      return setting.enumStringValues[value];
+    }
     if (value >= setting.enumValues.size()) return "";
     return I18N.get(setting.enumValues[value]);
   }

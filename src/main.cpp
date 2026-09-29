@@ -1,6 +1,6 @@
 #include <Arduino.h>
-#include <BoardConfig.h>
 #include <BleKeyboardHost.h>
+#include <BoardConfig.h>
 #include <Epub.h>
 #include <FontCacheManager.h>
 #include <FontDecompressor.h>
@@ -255,7 +255,6 @@ static bool loadSleepFrameBuffer() {
   Storage.remove(SLEEP_FRAME_FILE);
   return true;
 }
-
 
 // Enter deep sleep mode
 void enterDeepSleep(bool fromTimeout = false) {
@@ -546,8 +545,8 @@ void setup() {
       break;
   }
 
-  // Output polarity is resolved per render by ActivityManager (night mode
-  // inverts only the reading surfaces), so nothing to restore here.
+  // Output polarity is resolved per render by ActivityManager, so nothing to
+  // restore here.
 
   if (recoveryFirmwareMode) {
     // Skip normal home/reader routing: jump straight into the SD firmware picker.
@@ -702,7 +701,7 @@ void serviceBlePower(const bool localInputActivity) {
     }
   }
 }
-}
+}  // namespace
 
 void loop() {
   static unsigned long maxLoopDuration = 0;

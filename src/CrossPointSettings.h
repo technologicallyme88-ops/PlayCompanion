@@ -165,7 +165,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   };
 
   // UI Theme
-  enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2, ROUNDEDRAFF = 3 };
+  enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2, ROUNDEDRAFF = 3, HARVEST = 4 };
 
   // Image rendering in EPUB reader
   enum IMAGE_RENDERING { IMAGES_DISPLAY = 0, IMAGES_PLACEHOLDER = 1, IMAGES_SUPPRESS = 2, IMAGE_RENDERING_COUNT };
@@ -188,8 +188,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
 
   // Sleep screen settings
   uint8_t sleepScreen = DARK;
-  // Night mode: inverted output polarity on the reading surfaces only
-  // (resolved per render by ActivityManager via Activity::appliesNightMode).
+  // Night mode: inverted output polarity for every activity render.
   uint8_t screenInverted = 0;
   // Sleep screen cover mode settings
   uint8_t sleepScreenCoverMode = FIT;
@@ -291,7 +290,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   uint8_t pokemonCompanionSelected = 0;
 #endif
   // Draw the companion on the home screen (0 = off, 1 = on).
-  uint8_t companionOnHome = 1;
+  // Enable the Harvest farm panel and its reading-driven crop progression.
+  uint8_t farmingEnabled = 1;
   // SD card font family name (empty = use built-in fontFamily)
   char sdFontFamilyName[32] = "";
   // Dictionary folder name under /dictionaries (empty = no dictionary)

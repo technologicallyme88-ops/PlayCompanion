@@ -36,5 +36,20 @@ inline freeink::ui::ThemeTokens uiThemeTokens(const freeink::ui::GfxRendererTarg
   tokens.headerUnderline = static_cast<uint8_t>(metrics.headerUnderlineSize);
   tokens.headerTitleAlign = static_cast<fui::TextAlign>(metrics.headerTitleAlign);
   tokens.bodyText.bold = metrics.listTitleBold;
+  if (SETTINGS.uiTheme == CrossPointSettings::UI_THEME::HARVEST) {
+    tokens.listRow.explicitlySet = true;
+    // White painted boards with a crisp outline; the current row becomes the
+    // same sign in reverse rather than introducing a different shape.
+    tokens.listRow.normal.background = fui::Paint::solid(fui::Color::White);
+    tokens.listRow.normal.foreground = fui::Paint::solid(fui::Color::Black);
+    tokens.listRow.normal.border = fui::Paint::solid(fui::Color::Black);
+    tokens.listRow.normal.borderWidth = 1;
+    tokens.listRow.selected.background = fui::Paint::solid(fui::Color::Black);
+    tokens.listRow.selected.foreground = fui::Paint::solid(fui::Color::White);
+    tokens.listRow.focused = tokens.listRow.selected;
+    tokens.listRow.active = tokens.listRow.selected;
+    tokens.listRow.disabled = tokens.listRow.normal;
+    tokens.listRow.disabled.foreground = fui::Paint::dither(fui::Color::DarkGray);
+  }
   return tokens;
 }

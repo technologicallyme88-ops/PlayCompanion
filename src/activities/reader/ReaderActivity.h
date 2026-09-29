@@ -13,6 +13,8 @@ class ReaderActivity : public Activity {
   std::string bookPath;
   int pagesUntilFullRefresh = 0;
   bool forcedRefreshPending = false;
+  uint16_t farmSessionPages = 0;
+  bool farmFinishRecorded = false;
 
   std::unique_ptr<EndOfBookOptions> endOfBookOptions;
   std::atomic<bool> endOfBookOptionsReady{false};

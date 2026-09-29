@@ -1,7 +1,7 @@
 #include "BaseTheme.h"
 
-#include <FreeInkUIGfxRenderer.h>
 #include <BleKeyboardHost.h>
+#include <FreeInkUIGfxRenderer.h>
 #include <GfxRenderer.h>
 #include <HalClock.h>
 #include <HalGPIO.h>
@@ -524,8 +524,8 @@ void BaseTheme::drawHeader(const GfxRenderer& renderer, Rect rect, const char* t
   const int16_t batteryH = static_cast<int16_t>(metrics.batteryBarHeight);
   fui::batteryIndicator(ui.frame, fui::Rect{batteryX, band.y, batteryReserve, batteryH}, battery);
 
-  int statusX = batteryLeft ? batteryX + batteryReserve + usbStatusIconGap
-                            : batteryX - usbStatusIconGap - usbStatusIconWidth;
+  int statusX =
+      batteryLeft ? batteryX + batteryReserve + usbStatusIconGap : batteryX - usbStatusIconGap - usbStatusIconWidth;
   if (usbConnected) {
     const int usbY = band.y + (batteryH - usbStatusIconHeight) / 2;
     drawUsbStatusIcon(renderer, statusX, usbY);
@@ -891,6 +891,10 @@ HomeCompanionLayout BaseTheme::getHomeCompanionLayout(const GfxRenderer& rendere
       Rect{coverRect.x + layout.coverWidth, coverRect.y, kCompanionColumnWidth - kSideMargin, coverRect.height};
   return layout;
 }
+
+Rect BaseTheme::getHomeFarmPlotRect(const Rect) const { return {}; }
+
+void BaseTheme::drawHomeFarmPlot(const GfxRenderer&, const Rect) const {}
 
 void BaseTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                                const std::function<std::string(int index)>& buttonLabel,

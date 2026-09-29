@@ -31,6 +31,8 @@
 #include "OpdsServerStore.h"
 #include "RecentBooksStore.h"
 #include "activities/util/ConfirmationActivity.h"
+#include "apps_local/farm/FarmActivity.h"
+#include "apps_local/farm/FarmState.h"
 #include "companion/CompanionRenderer.h"
 #include "companion/CompanionState.h"
 #include "companion/CompanionTracker.h"
@@ -53,8 +55,8 @@ bool pokemonEncounterPendingNow() {
 #endif
 }
 
-void drawPokemonEncounterIndicator(const GfxRenderer& renderer, const Rect& headerBand) {
-#if defined(CROSSINK_ENABLE_POKEMON)
+void drawHomeNotificationIndicator(const GfxRenderer& renderer, const Rect& headerBand, const int position,
+                                   const char glyph) {
   const auto& metrics = UITheme::getInstance().getMetrics();
 
   // Reserve enough room for the worst-case battery label ("100%") and glyph.
@@ -71,8 +73,9 @@ void drawPokemonEncounterIndicator(const GfxRenderer& renderer, const Rect& head
 
   const bool batteryLeft = metrics.headerBatterySide == 1;
   const int edgeInset = metrics.headerBatteryDetached ? 12 : metrics.contentSidePadding;
-  int x = batteryLeft ? headerBand.x + edgeInset + batteryReserve + GAP
-                      : headerBand.x + headerBand.width - edgeInset - batteryReserve - GAP - BOX;
+  int x = batteryLeft
+              ? headerBand.x + edgeInset + batteryReserve + GAP + position * (BOX + GAP)
+              : headerBand.x + headerBand.width - edgeInset - batteryReserve - GAP - BOX - position * (BOX + GAP);
   const int y = headerBand.y + std::max(0, (static_cast<int>(metrics.batteryBarHeight) - BOX) / 2);
 
   // Pixel-art octagonal badge matching the supplied reference: clipped corners,
@@ -87,9 +90,14 @@ void drawPokemonEncounterIndicator(const GfxRenderer& renderer, const Rect& head
   renderer.drawLine(x + BOX - 4, y + BOX - 1, x + BOX - 2, y + BOX - 3, true);
 
   const int cx = x + BOX / 2;
-  renderer.fillRect(cx - 1, y + 4, 3, 7, true);
-  renderer.fillRect(cx - 1, y + 13, 3, 3, true);
-#endif
+  if (glyph == '!') {
+    renderer.fillRect(cx - 1, y + 4, 3, 7, true);
+    renderer.fillRect(cx - 1, y + 13, 3, 3, true);
+  } else {
+    renderer.fillRect(x + 4, y + 3, 2, 12, true);
+    renderer.fillRect(x + 4, y + 3, 8, 2, true);
+    renderer.fillRect(x + 4, y + 8, 6, 2, true);
+  }
 }
 
 // Companion dialogue must never use GfxRenderer::wrappedText() with a hard
@@ -262,6 +270,13 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
 void HomeActivity::onEnter() {
   Activity::onEnter();
 
+  static bool farmLoaded = false;
+  if (!farmLoaded) {
+    FARM_STATE.loadFromFile();
+    farmLoaded = true;
+  }
+  if (FARM_STATE.refreshForToday() && !FARM_STATE.saveToFile()) LOG_ERR("FARM", "Failed to save daily update");
+
   hasOpdsServers = OPDS_STORE.hasServers();
   // Resolve the calendar day once here rather than per render: the companion's
   // mood has to reflect days elapsed since the last reading session, and this
@@ -351,7 +366,7 @@ bool HomeActivity::storeCoverBuffer() {
 }
 
 void HomeActivity::drawCompanion(const Rect region) const {
-  if (!SETTINGS.companionEnabled || !SETTINGS.companionOnHome) return;
+  if (!SETTINGS.companionEnabled) return;
   if (region.width <= 0 || region.height <= 0) return;
 
   const int stripTop = region.y;
@@ -691,6 +706,15 @@ void HomeActivity::freeCoverBuffer() {
   coverBufferStored = false;
 }
 
+void HomeActivity::showFarmMenu() {
+  auto activity = makeUniqueNoThrow<farm::FarmActivity>(renderer, mappedInput);
+  if (!activity) {
+    LOG_ERR("FARM", "OOM: FarmActivity");
+    return;
+  }
+  startActivityForResult(std::move(activity), [](const ActivityResult&) {});
+}
+
 void HomeActivity::loop() {
   if (bookOptionsPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return;
 
@@ -800,6 +824,17 @@ void HomeActivity::loop() {
   const int recentCount = std::min(static_cast<int>(recentBooks.size()), coverColumnCount);
   const int coverColumnWidth = (renderer.getScreenWidth() - 2 * metrics.contentSidePadding) / coverColumnCount;
 #if FREEINK_DEVICE_X4PRO
+  int farmX = 0;
+  int farmY = 0;
+  if (farmPlotRect.width > 0 && mappedInput.wasScreenTapped(farmX, farmY) && farmX >= farmPlotRect.x &&
+      farmX < farmPlotRect.x + farmPlotRect.width && farmY >= farmPlotRect.y &&
+      farmY < farmPlotRect.y + farmPlotRect.height) {
+    showFarmMenu();
+    requestUpdate();
+    return;
+  }
+#endif
+#if FREEINK_DEVICE_X4PRO
   int heldBookX = 0;
   int heldBookY = 0;
   if (mappedInput.wasScreenLongPress(heldBookX, heldBookY)) {
@@ -833,13 +868,14 @@ void HomeActivity::loop() {
           auto confirmation =
               makeUniqueNoThrow<ConfirmationActivity>(renderer, mappedInput, tr(STR_REMOVE_FROM_RECENTS), title);
           if (confirmation) {
-            startActivityForResult(std::move(confirmation), [this, path, coverColumnCount](const ActivityResult& result) {
-              if (!result.isCancelled && RECENT_BOOKS.removeByPath(path)) {
-                loadRecentBooks(coverColumnCount);
-                selectorIndex = 0;
-                requestUpdate(true);
-              }
-            });
+            startActivityForResult(std::move(confirmation),
+                                   [this, path, coverColumnCount](const ActivityResult& result) {
+                                     if (!result.isCancelled && RECENT_BOOKS.removeByPath(path)) {
+                                       loadRecentBooks(coverColumnCount);
+                                       selectorIndex = 0;
+                                       requestUpdate(true);
+                                     }
+                                   });
           } else {
             LOG_ERR("HOME", "OOM: ConfirmationActivity");
           }
@@ -940,12 +976,13 @@ void HomeActivity::render(RenderLock&&) {
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, pageWidth, metrics.homeTopPadding - metrics.topPadding},
                  metrics.homeContinueReadingInMenu && !recentBooks.empty() ? recentBooks[0].title.c_str() : nullptr);
 
+  const Rect notificationBand{0, metrics.topPadding, pageWidth, metrics.homeTopPadding - metrics.topPadding};
+  int notificationPosition = 0;
 #if defined(CROSSINK_ENABLE_POKEMON)
-  if (pokemonEncounterPending) {
-    drawPokemonEncounterIndicator(renderer,
-                                  Rect{0, metrics.topPadding, pageWidth, metrics.homeTopPadding - metrics.topPadding});
-  }
+  if (pokemonEncounterPending) drawHomeNotificationIndicator(renderer, notificationBand, notificationPosition++, '!');
 #endif
+  if (FARM_STATE.hasFarmNotification())
+    drawHomeNotificationIndicator(renderer, notificationBand, notificationPosition, 'F');
 
   // Record the tile rect so storeCoverBuffer (called from the theme) knows
   // which sub-region of the framebuffer to snapshot. ~16 KB in Portrait
@@ -1002,6 +1039,7 @@ void HomeActivity::render(RenderLock&&) {
     menuRect.height = std::max(0, pageHeight - metrics.buttonHintsHeight - menuRect.y - 8);
   }
   const Rect coverRect{0, metrics.homeTopPadding, pageWidth, metrics.homeCoverTileHeight};
+  farmPlotRect = GUI.getHomeFarmPlotRect(coverRect);
   const auto labelAt = [&menuItems](int index) { return std::string(menuItems[index]); };
 
   // The theme decides where the companion goes and what gives up room for it.
@@ -1021,6 +1059,7 @@ void HomeActivity::render(RenderLock&&) {
   coverRectW = drawnCover.width;
   GUI.drawRecentBookCover(renderer, drawnCover, recentBooks, selectorIndex, coverRendered, coverBufferStored,
                           bufferRestored, std::bind(&HomeActivity::storeCoverBuffer, this));
+  GUI.drawHomeFarmPlot(renderer, farmPlotRect);
 
   const int renderedSelection =
       metrics.homeContinueReadingInMenu ? selectorIndex : selectorIndex - static_cast<int>(recentBooks.size());
@@ -1041,7 +1080,7 @@ void HomeActivity::render(RenderLock&&) {
                        [&menuIcons](int index) { return menuIcons[index]; });
   }
 
-#if defined(CROSSINK_ENABLE_POKEMON)
+#if defined(CROSSINK_ENABLE_POKEMON) || defined(CROSSINK_SIM_POKEMON_HOME_TILE)
   // Pokémon occupies the lower-right column beside the final shelf row. The
   // companion is lifted slightly so its art and dialogue remain clear.
   if (!buttonPokemonMenu && homeShelfFolderCount() > 0 && companion.region.width > 0) {
