@@ -25,6 +25,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -41,7 +44,9 @@ import java.util.concurrent.TimeUnit
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
+import java.net.Inet4Address
 import java.net.NetworkInterface
+import java.net.SocketTimeoutException
 import java.io.File
 
 data class ReaderFile(val name: String, val size: Long, val directory: Boolean)
@@ -133,22 +138,87 @@ class ReaderApi(
         .writeTimeout(5, TimeUnit.MINUTES)
         .build()
 ) {
+    private val discoveryClient = client.newBuilder()
+        .connectTimeout(400, TimeUnit.MILLISECONDS)
+        .readTimeout(700, TimeUnit.MILLISECONDS)
+        .writeTimeout(700, TimeUnit.MILLISECONDS)
+        .build()
+
+    private fun isReader(baseUrl: String): Boolean = runCatching {
+        discoveryClient.newCall(
+            Request.Builder().url(baseUrl.trimEnd('/') + "/api/status").build()
+        ).execute().use { response ->
+            if (!response.isSuccessful) return@use false
+            val json = JSONObject(response.body?.string() ?: "{}")
+            json.optString("device").isNotBlank() && json.optString("version").isNotBlank()
+        }
+    }.getOrDefault(false)
+
+    private fun localSubnetAddresses(): List<String> {
+        val addresses = linkedSetOf<String>()
+        NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()
+            .filter { it.isUp && !it.isLoopback }
+            .flatMap { it.interfaceAddresses }
+            .filter { it.address is Inet4Address && it.broadcast != null }
+            .forEach { interfaceAddress ->
+                val octets = interfaceAddress.address.address.map { it.toInt() and 0xff }
+                val prefixLength = interfaceAddress.networkPrefixLength.toInt().coerceIn(24, 30)
+                val address = octets.fold(0) { value, octet -> (value shl 8) or octet }
+                val mask = -1 shl (32 - prefixLength)
+                val network = address and mask
+                val lastHost = (network or mask.inv()) - 1
+                for (host in network + 1..lastHost) {
+                    if (host == address) continue
+                    addresses += listOf(host ushr 24, host ushr 16, host ushr 8, host)
+                        .joinToString(".") { (it and 0xff).toString() }
+                }
+            }
+        return addresses.toList()
+    }
+
     suspend fun discover(): String = withContext(Dispatchers.IO) {
+        val directCandidates = linkedSetOf("http://crosspoint.local", "http://192.168.4.1")
         DatagramSocket().use { socket ->
             socket.broadcast = true
-            socket.soTimeout = 1500
+            socket.soTimeout = 900
             val payload = "hello".toByteArray()
             val destinations = linkedSetOf(InetAddress.getByName("255.255.255.255"))
             NetworkInterface.getNetworkInterfaces()?.toList().orEmpty()
                 .filter { it.isUp && !it.isLoopback }
                 .flatMap { it.interfaceAddresses }
                 .mapNotNullTo(destinations) { it.broadcast }
-            destinations.forEach { socket.send(DatagramPacket(payload, payload.size, it, 8134)) }
-            val buffer = ByteArray(256)
-            val packet = DatagramPacket(buffer, buffer.size)
-            socket.receive(packet)
-            "http://${packet.address.hostAddress}"
+
+            repeat(3) {
+                destinations.forEach { destination ->
+                    runCatching { socket.send(DatagramPacket(payload, payload.size, destination, 8134)) }
+                }
+                val deadline = System.currentTimeMillis() + 900
+                while (System.currentTimeMillis() < deadline) {
+                    val buffer = ByteArray(256)
+                    val packet = DatagramPacket(buffer, buffer.size)
+                    try {
+                        socket.receive(packet)
+                        val reply = String(packet.data, 0, packet.length)
+                        if (reply.startsWith("crosspoint")) {
+                            return@withContext "http://${packet.address.hostAddress}"
+                        }
+                    } catch (_: SocketTimeoutException) {
+                        break
+                    }
+                }
+            }
         }
+
+        directCandidates.firstOrNull(::isReader)?.let { return@withContext it }
+
+        localSubnetAddresses().chunked(32).forEach { batch ->
+            val found = coroutineScope {
+                batch.map { ip -> async(Dispatchers.IO) { "http://$ip".takeIf(::isReader) } }.awaitAll()
+            }.firstOrNull { it != null }
+            if (found != null) return@withContext found
+        }
+
+        error("No reader found on this network")
     }
 
     suspend fun list(baseUrl: String, path: String): List<ReaderFile> = withContext(Dispatchers.IO) {
