@@ -55,6 +55,7 @@ constexpr int kButtonFontId = 0x70B0'0009;
 // overflows.
 constexpr int kReadingSmallFontId = 0x70B0'000A;
 constexpr int kReadingBoldSmallFontId = 0x70B0'000B;
+constexpr int kTerminalMonoFontId = 0x70B0'000C;
 
 // Call from an activity's onEnter() before drawing. Idempotent and cheap.
 void ensureFonts(GfxRenderer& renderer);

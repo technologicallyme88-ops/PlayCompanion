@@ -141,6 +141,7 @@ enum UIIcon {
   Bookmark,
   Games,
   Apps,
+  Farm,
   Pokemon
 };
 

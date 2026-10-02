@@ -72,6 +72,8 @@ const uint8_t* iconForName(UIIcon icon, int size) {
         return ShelfGamesIcon;
       case UIIcon::Apps:
         return ShelfAppsIcon;
+      case UIIcon::Farm:
+        return ShelfFarmCopperCanIcon;
       case UIIcon::Pokemon:
         return ShelfPokemonIcon;
       case UIIcon::Transfer:

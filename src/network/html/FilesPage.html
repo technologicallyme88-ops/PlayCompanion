@@ -5323,6 +5323,23 @@ function uploadFileWebSocket(file, onProgress, onComplete, onError) {
     let uploadStarted = false;
     let sendingChunks = false;
     let uploadComplete = false; // set only when DONE is received and resolve() called
+    let nextOffset = 0;
+
+    async function sendNextChunk() {
+      if (nextOffset >= file.size || ws.readyState !== WebSocket.OPEN) {
+        sendingChunks = false;
+        return;
+      }
+
+      const chunkSize = Math.min(WS_CHUNK_SIZE, file.size - nextOffset);
+      const chunk = file.slice(nextOffset, nextOffset + chunkSize);
+      const buffer = await chunk.arrayBuffer();
+      if (ws.readyState !== WebSocket.OPEN) {
+        throw new Error('WebSocket closed during upload');
+      }
+      ws.send(buffer);
+      nextOffset += chunkSize;
+    }
 
     ws.binaryType = 'arraybuffer';
 
@@ -5339,41 +5356,10 @@ function uploadFileWebSocket(file, onProgress, onComplete, onError) {
       if (msg === 'READY') {
         uploadStarted = true;
         sendingChunks = true;
-
-        // Small delay to let connection stabilize
-        await new Promise(r => setTimeout(r, 50));
-
         try {
-          // Send file in chunks
-          const totalSize = file.size;
-          let offset = 0;
-
-          while (offset < totalSize && ws.readyState === WebSocket.OPEN) {
-            const chunkSize = Math.min(WS_CHUNK_SIZE, totalSize - offset);
-            const chunk = file.slice(offset, offset + chunkSize);
-            const buffer = await chunk.arrayBuffer();
-
-            // Wait for buffer to clear - more aggressive backpressure
-            while (ws.bufferedAmount > WS_CHUNK_SIZE * 2 && ws.readyState === WebSocket.OPEN) {
-              await new Promise(r => setTimeout(r, 5));
-            }
-
-            if (ws.readyState !== WebSocket.OPEN) {
-              throw new Error('WebSocket closed during upload');
-            }
-
-            ws.send(buffer);
-            offset += chunkSize;
-
-            // Update local progress with real transfer progress
-            // Server will confirm 100% with DONE message
-            if (onProgress) {
-              onProgress(offset, totalSize);
-            }
-          }
-
-          sendingChunks = false;
-          console.log('[WS] All chunks sent, waiting for DONE');
+          // The X3 has no PSRAM. Send one chunk at a time and wait for the
+          // device's PROGRESS acknowledgement before reading the next chunk.
+          await sendNextChunk();
         } catch (err) {
           console.error('[WS] Error sending chunks:', err);
           sendingChunks = false;
@@ -5381,9 +5367,19 @@ function uploadFileWebSocket(file, onProgress, onComplete, onError) {
           reject(err);
         }
       } else if (msg.startsWith('PROGRESS:')) {
-        // Server confirmed progress - log for debugging but don't update UI
-        // (local progress is smoother, server progress causes jumping)
-        console.log('[WS] Server progress:', msg);
+        const parts = msg.split(':');
+        const received = Number(parts[1]);
+        const total = Number(parts[2]);
+        if (onProgress && Number.isFinite(received) && Number.isFinite(total)) {
+          onProgress(received, total);
+        }
+        try {
+          await sendNextChunk();
+        } catch (err) {
+          sendingChunks = false;
+          ws.close();
+          reject(err);
+        }
       } else if (msg === 'DONE') {
         // Show 100% when server confirms completion
         if (onProgress) onProgress(file.size, file.size);

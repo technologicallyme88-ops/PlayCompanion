@@ -37,6 +37,7 @@ class FarmActivity final : public Activity {
   int selected_ = 0;
   uint8_t herbCrop_ = 1;
   uint8_t selectedPlot_ = 0;
+  uint8_t careStatsPlot_ = 0;
   bool plotSelectionArmed_ = false;
   bool cleanRefreshNeeded_ = true;
   int listTop_ = 0;

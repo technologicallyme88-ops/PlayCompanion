@@ -42,6 +42,11 @@
 namespace {
 // One-shot: set by the boot path, consumed by the first home paint.
 bool panelHoldsRetainedFrame = false;
+#if defined(ARDUINO_ARCH_ESP32)
+RTC_DATA_ATTR int lastHomeSelection = 0;
+#else
+int lastHomeSelection = 0;
+#endif
 
 int homeShelfFolderCount() { return std::min(1, shelf::folderCount()); }
 
@@ -177,7 +182,7 @@ int HomeActivity::upstreamMenuRows() const {
 }
 
 int HomeActivity::getMenuItemCount() const {
-  int count = 4 + homeShelfFolderCount();  // stock rows + the CrossPlay Games folder
+  int count = 5 + homeShelfFolderCount();  // stock rows + Games + Farm
 #if defined(CROSSINK_ENABLE_POKEMON)
   count++;  // Pokémon follows the game folders in button navigation.
 #endif
@@ -270,14 +275,15 @@ void HomeActivity::loadRecentCovers(int coverHeight) {
 void HomeActivity::onEnter() {
   Activity::onEnter();
 
-  static bool farmLoaded = false;
-  if (!farmLoaded) {
-    FARM_STATE.loadFromFile();
-    farmLoaded = true;
+  const bool farmLoaded = FARM_STATE.initializeFromFile();
+  Storage.mkdir("/.crosspoint/harvest");
+  Storage.mkdir("/.crosspoint/harvest/crops");
+  if (farmLoaded && FARM_STATE.refreshForToday() && !FARM_STATE.saveToFile()) {
+    LOG_ERR("FARM", "Failed to save daily update");
   }
-  if (FARM_STATE.refreshForToday() && !FARM_STATE.saveToFile()) LOG_ERR("FARM", "Failed to save daily update");
 
-  hasOpdsServers = OPDS_STORE.hasServers();
+  // OPDS remains configurable in Settings but no longer occupies Home.
+  hasOpdsServers = false;
   // Resolve the calendar day once here rather than per render: the companion's
   // mood has to reflect days elapsed since the last reading session, and this
   // is the only screen that shows it outside one.
@@ -314,12 +320,9 @@ void HomeActivity::onEnter() {
   loadRecentBooks(metrics.homeRecentBooksCount);
 
   const auto base = static_cast<int>(recentBooks.size());
-  selectorIndex = initialMenuItem == HomeMenuItem::NONE ? 0 : base + menuItemToIndex(initialMenuItem, hasOpdsServers);
-
-  // Restore the CrossPlay shelf folder selection when returning Home.
-  if (const int shelfRow = shelf::lastFolderOnHome(); shelfRow >= 0) {
-    selectorIndex = base + upstreamMenuRows() + shelfRow;
-  }
+  selectorIndex = initialMenuItem == HomeMenuItem::NONE
+                      ? std::clamp(lastHomeSelection, 0, std::max(0, getMenuItemCount() - 1))
+                      : base + menuItemToIndex(initialMenuItem, hasOpdsServers);
 
   // Simulator/site helper; a no-op on normal hardware unless the environment is set.
   shelf::autostartFromEnv(renderer, mappedInput);
@@ -329,6 +332,7 @@ void HomeActivity::onEnter() {
 }
 
 void HomeActivity::onExit() {
+  lastHomeSelection = selectorIndex;
   Activity::onExit();
 
   // Consume the milestone once the user has actually been on the screen that
@@ -719,7 +723,7 @@ void HomeActivity::loop() {
   if (bookOptionsPopup.handleInput(mappedInput, [this] { requestUpdate(); })) return;
 
   const int bookCount = static_cast<int>(recentBooks.size());
-  const bool farmFocusable = SETTINGS.uiTheme == CrossPointSettings::UI_THEME::HARVEST && SETTINGS.farmingEnabled;
+  const bool farmFocusable = false;
   const int farmSelectorIndex = bookCount;
   const int farmOffset = farmFocusable ? 1 : 0;
   const int menuCount = getMenuItemCount() + farmOffset;
@@ -757,11 +761,15 @@ void HomeActivity::loop() {
           shelf::openFolder(shelfRow, renderer, mappedInput);
           break;
         }
+        if (menuIndex == upstreamMenuRows() + homeShelfFolderCount()) {
+          showFarmMenu();
+          break;
+        }
 #if defined(CROSSINK_ENABLE_POKEMON)
         // Pokémon is the companion-side tile paired with the final Games row.
         // Keep it after the CrossPlay folders in navigation order so restoring
         // the Games selection continues to use the unchanged shelf index.
-        if (menuIndex == upstreamMenuRows() + homeShelfFolderCount()) {
+        if (menuIndex == upstreamMenuRows() + homeShelfFolderCount() + 1) {
           onPokemonOpen();
         }
 #endif
@@ -947,20 +955,22 @@ void HomeActivity::loop() {
   if (homeShelfFolderCount() > 0) {
     const int stockRenderedRows =
         upstreamMenuRows() + (metrics.homeContinueReadingInMenu && !recentBooks.empty() ? 1 : 0);
-    const int pokemonRenderedRow = stockRenderedRows + homeShelfFolderCount() - 1;
-    const int pokemonLeft = std::max(0, companionMenuWidth - 8);
-    const int pokemonRight = renderer.getScreenWidth();
+    // Pokémon is paired with the Farm row, which follows the shelf folders.
+    const int pokemonRenderedRow = stockRenderedRows + homeShelfFolderCount();
+    // Match Lyra's actual tile rectangle rather than the wider outer menu
+    // rectangle passed to drawButtonMenu().
+    const int pokemonOuterX = std::max(0, companionMenuWidth - metrics.contentSidePadding - 8);
+    const int pokemonLeft = pokemonOuterX + metrics.contentSidePadding;
+    const int pokemonRight = renderer.getScreenWidth() - metrics.contentSidePadding;
     const int tileY = menuTop + pokemonRenderedRow * (menuRowHeight + metrics.menuSpacing);
-    int touchRow = -1;
-    const auto touch = mappedInput.rowTouch(touchRow, tileY, menuRowHeight + metrics.menuSpacing, 1, pokemonLeft,
-                                            pokemonRight, menuRowHeight);
-    if (touch != MappedInputManager::RowTouch::None) {
-      const int menuIndex = upstreamMenuRows() + homeShelfFolderCount();
+    int touchX = 0;
+    int touchY = 0;
+    const bool pokemonTapped = mappedInput.wasScreenTapped(touchX, touchY) && touchX >= pokemonLeft &&
+                               touchX < pokemonRight && touchY >= tileY && touchY < tileY + menuRowHeight;
+    if (pokemonTapped) {
+      const int menuIndex = upstreamMenuRows() + homeShelfFolderCount() + 1;
       selectorIndex = bookCount + farmOffset + menuIndex;
-      if (touch == MappedInputManager::RowTouch::Down)
-        requestUpdate();
-      else
-        onPokemonOpen();
+      onPokemonOpen();
       return;
     }
   }
@@ -1034,6 +1044,8 @@ void HomeActivity::render(RenderLock&&) {
     }
   };
   appendFolderRows(homeShelfFolderCount());
+  menuItems.push_back(tr(STR_FARM));
+  menuIcons.push_back(Farm);
 #if defined(CROSSINK_ENABLE_POKEMON)
   if (buttonPokemonMenu) {
     menuItems.push_back(tr(STR_POKEMON));
@@ -1048,8 +1060,11 @@ void HomeActivity::render(RenderLock&&) {
     menuRect.height = std::max(0, pageHeight - metrics.buttonHintsHeight - menuRect.y - 8);
   }
   const Rect coverRect{0, metrics.homeTopPadding, pageWidth, metrics.homeCoverTileHeight};
+  // Keep the Harvest farm preview visible beside the home menu. The Farm menu
+  // row is the entry point; the preview itself is informational and is not a
+  // second selectable row.
   farmPlotRect = GUI.getHomeFarmPlotRect(coverRect);
-  const bool farmFocusable = farmPlotRect.width > 0 && farmPlotRect.height > 0;
+  const bool farmFocusable = false;
   const int farmSelectorIndex = static_cast<int>(recentBooks.size());
   const int farmOffset = farmFocusable ? 1 : 0;
   const auto labelAt = [&menuItems](int index) { return std::string(menuItems[index]); };
@@ -1110,7 +1125,7 @@ void HomeActivity::render(RenderLock&&) {
     const int pokemonRight = pageWidth;
     Rect pokemonRect{pokemonX, menuRect.y + pokemonRenderedRow * rowStep, std::max(0, pokemonRight - pokemonX),
                      GUI.getMenuRowHeight(renderer)};
-    const int pokemonMenuIndex = upstreamMenuRows() + homeShelfFolderCount();
+    const int pokemonMenuIndex = upstreamMenuRows() + homeShelfFolderCount() + 1;
     const int pokemonSelectorIndex = static_cast<int>(recentBooks.size()) + farmOffset + pokemonMenuIndex;
     GUI.drawButtonMenu(
         renderer, pokemonRect, 1, selectorIndex == pokemonSelectorIndex ? 0 : -1,

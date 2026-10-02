@@ -19,10 +19,12 @@ class ReadingJournalActivity final : public Activity {
   void render(RenderLock&&) override;
 
  private:
-  enum class View : uint8_t { Calendar, Summary, DateEditor };
+  enum class View : uint8_t { Calendar, List, Stats, Summary, DateEditor };
   void stepMonth(int delta);
   void selectNext(int delta);
   void drawCalendar();
+  void drawList();
+  void drawStats();
   void drawSummary();
   void drawDateEditor();
   void beginDateEdit(bool finish);
@@ -31,6 +33,8 @@ class ReadingJournalActivity final : public Activity {
   void stepEditMonth(int delta);
   bool entryMatchesDate(int index, uint32_t date) const;
   int firstEntryForDate(uint32_t date) const;
+  void drawViewTabs(int y);
+  bool handleViewTabTap(int x, int y);
 
   std::unique_ptr<journal::Entry[]> entries;
   int count = 0;
@@ -40,6 +44,8 @@ class ReadingJournalActivity final : public Activity {
   std::string focusPath;
   bool returnToCaller = false;
   uint32_t calendarSelectedDate = 0;
+  int listOffset = 0;
+  journal::Stats stats{};
   View view = View::Calendar;
   int summaryField = 0;  // 0 started, 1 finished, 2 rating
   bool editingFinish = false;
@@ -47,6 +53,7 @@ class ReadingJournalActivity final : public Activity {
   int editMonth = 1;
   int editDay = 1;
   Rect bookCardRect{};
+  Rect viewTabRects[3] = {Rect{}, Rect{}, Rect{}};
   Rect calendarGridRect{};
   int calendarVisibleEntries[3] = {-1, -1, -1};
   int calendarVisibleCount = 0;

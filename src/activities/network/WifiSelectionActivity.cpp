@@ -13,6 +13,7 @@
 #include "MappedInputManager.h"
 #include "WifiCredentialStore.h"
 #include "activities/util/KeyboardEntryActivity.h"
+#include "apps_local/farm/FarmWeather.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -527,6 +528,7 @@ void WifiSelectionActivity::checkConnectionStatus() {
         SETTINGS.saveToFile();
       }
     }
+    farm::refreshWeatherIfDue();
 
     // Save this as the last connected network - SD card operations need lock as
     // we use SPI for both

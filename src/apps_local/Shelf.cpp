@@ -2,7 +2,6 @@
 
 #include <HalStorage.h>
 #include <Logging.h>
-
 #include <strings.h>
 
 #include <cstdio>
@@ -19,6 +18,7 @@
 #include "murdle/MurdleActivity.h"
 #include "player/PlayerActivity.h"
 #include "solitaire/SolitaireActivity.h"
+#include "terminalhack/TerminalHackActivity.h"
 #include "ui/ToyboxIcons.h"
 
 namespace {
@@ -34,6 +34,7 @@ constexpr shelf::Item kGames[] = {
     {"D&DIAGRAMS", &icon_dungeon_32, &DungeonActivity::create},
     {"DUNGEON RUN", &icon_dungeon_32, &DungeonRunActivity::create},
     {"CONNECTIONS", &icon_connections_32, &ConnectionsActivity::create},
+    {"TERMINAL HACK", &icon_unreadable_32, &TerminalHackActivity::create},
 };
 
 constexpr shelf::Item kApps[] = {
@@ -263,6 +264,19 @@ void autostartFromEnv(GfxRenderer& renderer, MappedInputManager& mappedInput) {
     }
   }
   LOG_ERR("SHELF", "Autostart: no item titled '%s'", wanted);
+}
+
+bool resumeItemByTitle(const char* title, GfxRenderer& renderer, MappedInputManager& mappedInput) {
+  if (title == nullptr || *title == '\0') return false;
+  for (int folder = 0; folder < kFolderCount; ++folder) {
+    for (int item = 0; item < kFolders[folder].count; ++item) {
+      if (strcasecmp(kFolders[folder].items[item].title, title) != 0) continue;
+      LOG_INF("SHELF", "Resuming %s after sleep", kFolders[folder].items[item].title);
+      openItem(folder, item, renderer, mappedInput);
+      return true;
+    }
+  }
+  return false;
 }
 
 void openPlayer(GfxRenderer& renderer, MappedInputManager& mappedInput) {

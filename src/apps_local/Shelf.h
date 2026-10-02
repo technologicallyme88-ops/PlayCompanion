@@ -116,6 +116,9 @@ void openPlayer(GfxRenderer& renderer, MappedInputManager& mappedInput);
 // development. Same getenv-in-firmware precedent as CROSSPLAY_SEED.
 void autostartFromEnv(GfxRenderer& renderer, MappedInputManager& mappedInput);
 
+// Reopen a shelf item by its stable title after a deep-sleep reset.
+bool resumeItemByTitle(const char* title, GfxRenderer& renderer, MappedInputManager& mappedInput);
+
 // Go back one level: an app returns to its folder, a folder returns to Home.
 //
 // The current folder is module state rather than something each app carries,

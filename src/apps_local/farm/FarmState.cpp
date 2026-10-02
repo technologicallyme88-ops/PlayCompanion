@@ -2,6 +2,7 @@
 
 #include <CompanionMood.h>
 #include <HalClock.h>
+#include <HalStorage.h>
 #include <Logging.h>
 
 #include <algorithm>
@@ -11,16 +12,21 @@
 namespace farm {
 namespace {
 constexpr std::array<CropDefinition, CROP_COUNT> CROPS = {{
-    {0, 4, 20, 35, false}, {0, 7, 35, 60, false},  // spring
-    {1, 5, 25, 45, false}, {1, 8, 40, 75, true},   // summer
-    {2, 6, 30, 55, false}, {2, 9, 45, 85, false},  // fall
-    {3, 5, 25, 50, false}, {3, 8, 40, 80, true},   // winter
+    {0, 4, 20, 35, false},
+    {0, 7, 35, 60, false},  // spring
+    {1, 5, 25, 45, false},
+    {1, 8, 40, 75, true},  // summer
+    {2, 6, 30, 55, false},
+    {2, 9, 45, 85, false},  // fall
+    {3, 5, 25, 50, false},
+    {3, 8, 40, 80, true},  // winter
 }};
 constexpr std::array<uint16_t, PLOT_COUNT - 1> PLOT_PRICES = {250, 600, 1200};
 constexpr std::array<uint16_t, QUEST_COUNT> QUEST_GOALS = {30, 5, 3, 15, 10, 3};
 constexpr std::array<uint16_t, QUEST_COUNT> QUEST_REWARDS = {1, 1, 1, 1, 1, 1};
 constexpr uint8_t MAX_VITAL = 100;
 constexpr uint8_t MAX_CARE_CREDITS = 5;
+constexpr int32_t WEATHER_REFRESH_MINUTES = 4 * 60;
 
 uint8_t clampAdd(const uint8_t value, const uint8_t amount) {
   return static_cast<uint8_t>(std::min<int>(MAX_VITAL, value + amount));
@@ -38,6 +44,28 @@ int32_t signedUtcOffsetQuarterHours() {
 }  // namespace
 
 FarmState::FarmState() = default;
+
+bool FarmState::initializeFromFile() {
+  if (persistenceReady) return true;
+  if (!Storage.exists(getFilePath())) {
+    persistenceReady = true;
+    return true;
+  }
+  if (!PersistableStore<FarmState>::loadFromFile()) {
+    LOG_ERR("FARM", "Failed to load existing farm state");
+    return false;
+  }
+  persistenceReady = true;
+  return true;
+}
+
+bool FarmState::saveToFile() const {
+  if (!persistenceReady) {
+    LOG_ERR("FARM", "Refusing to overwrite farm state before it is loaded");
+    return false;
+  }
+  return PersistableStore<FarmState>::saveToFile();
+}
 
 const CropDefinition& FarmState::crop(const uint8_t cropId) {
   const int index = cropId > 0 && cropId <= CROP_COUNT ? cropId - 1 : 0;
@@ -65,6 +93,8 @@ void FarmState::toJson(JsonDocument& doc) const {
   doc["questRewardClaims"] = questRewardClaims;
   doc["careCredits"] = careCredits;
   doc["questDay"] = questDay;
+  doc["lastWeatherMinute"] = lastWeatherMinute;
+  doc["weatherEffect"] = static_cast<uint8_t>(currentWeather);
   JsonArray plotArray = doc["plots"].to<JsonArray>();
   for (const Plot& plot : plots) {
     JsonObject obj = plotArray.add<JsonObject>();
@@ -118,6 +148,11 @@ bool FarmState::fromJson(const JsonVariantConst doc) {
   questRewardClaims = doc["questRewardClaims"] | static_cast<uint8_t>(0);
   careCredits = std::min<uint8_t>(MAX_CARE_CREDITS, doc["careCredits"] | static_cast<uint8_t>(0));
   questDay = doc["questDay"] | 0;
+  lastWeatherMinute = doc["lastWeatherMinute"] | 0;
+  const uint8_t savedWeather = doc["weatherEffect"] | static_cast<uint8_t>(WeatherEffect::Clear);
+  currentWeather = savedWeather <= static_cast<uint8_t>(WeatherEffect::Snow)
+                       ? static_cast<WeatherEffect>(savedWeather)
+                       : WeatherEffect::Clear;
 
   plots = {};
   int plotIndex = 0;
@@ -198,7 +233,8 @@ void FarmState::advanceDays(const int32_t days) {
     plot.moisture = clampSub(plot.moisture, moistureDecay);
     plot.sunlight = clampSub(plot.sunlight, sunlightDecay);
     plot.nutrients = clampSub(plot.nutrients, nutrientDecay);
-    if (ownsUpgrade(2)) plot.nutrients = clampAdd(plot.nutrients, static_cast<uint8_t>(std::min<int32_t>(100, days * 12)));
+    if (ownsUpgrade(2))
+      plot.nutrients = clampAdd(plot.nutrients, static_cast<uint8_t>(std::min<int32_t>(100, days * 12)));
     if (plot.moisture < 20 || plot.nutrients < 20) {
       uint8_t healthDecay = static_cast<uint8_t>(std::min<int32_t>(100, days * 12));
       if (ownsUpgrade(3)) healthDecay /= 2;
@@ -219,8 +255,8 @@ bool FarmState::refreshForToday() {
   uint8_t hour = 0;
   uint8_t minute = 0;
   if (!halClock.getUtcDateTime(year, month, dayOfMonth, hour, minute)) return false;
-  const int32_t localDay = companion::localDayNumber(year, month, dayOfMonth, hour, minute,
-                                                      signedUtcOffsetQuarterHours());
+  const int32_t localDay =
+      companion::localDayNumber(year, month, dayOfMonth, hour, minute, signedUtcOffsetQuarterHours());
   resetQuestsIfNeeded(localDay);
   if (lastLocalDay == 0) {
     lastLocalDay = localDay;
@@ -229,6 +265,37 @@ bool FarmState::refreshForToday() {
   if (localDay <= lastLocalDay) return false;
   advanceDays(localDay - lastLocalDay);
   lastLocalDay = localDay;
+  return true;
+}
+
+bool FarmState::weatherCheckDue(const int32_t utcMinute) const {
+  return SETTINGS.farmingEnabled && utcMinute > 0 &&
+         (lastWeatherMinute <= 0 || utcMinute < lastWeatherMinute ||
+          utcMinute - lastWeatherMinute >= WEATHER_REFRESH_MINUTES);
+}
+
+bool FarmState::applyWeather(const WeatherEffect effect, const int32_t utcMinute) {
+  if (!weatherCheckDue(utcMinute)) return false;
+  for (int i = 0; i < ownedPlotCount; ++i) {
+    Plot& plot = plots[i];
+    if (plot.cropId == 0 || plot.withered) continue;
+    switch (effect) {
+      case WeatherEffect::Rain:
+        plot.moisture = clampAdd(plot.moisture, 25);
+        break;
+      case WeatherEffect::Snow:
+        plot.moisture = clampAdd(plot.moisture, 10);
+        break;
+      case WeatherEffect::Clear:
+        plot.sunlight = clampAdd(plot.sunlight, 12);
+        break;
+      case WeatherEffect::Cloudy:
+        plot.sunlight = clampAdd(plot.sunlight, 4);
+        break;
+    }
+  }
+  lastWeatherMinute = utcMinute;
+  currentWeather = effect;
   return true;
 }
 
@@ -265,9 +332,7 @@ bool FarmState::buySeedAndPlant(const uint8_t cropId) {
   return true;
 }
 
-uint16_t FarmState::nextPlotPrice() const {
-  return ownedPlotCount < PLOT_COUNT ? PLOT_PRICES[ownedPlotCount - 1] : 0;
-}
+uint16_t FarmState::nextPlotPrice() const { return ownedPlotCount < PLOT_COUNT ? PLOT_PRICES[ownedPlotCount - 1] : 0; }
 
 bool FarmState::buyNextPlot() {
   const uint16_t price = nextPlotPrice();
@@ -299,8 +364,7 @@ bool FarmState::sellAll() {
       if (branch == static_cast<int>(CropBranch::Wild)) value = static_cast<uint16_t>(value * 4 / 5);
       coins = static_cast<uint16_t>(
           std::min<uint32_t>(UINT16_MAX, coins + static_cast<uint32_t>(harvested[i][branch]) * value));
-      sold[i][branch] = static_cast<uint16_t>(
-          std::min<uint32_t>(UINT16_MAX, sold[i][branch] + harvested[i][branch]));
+      sold[i][branch] = static_cast<uint16_t>(std::min<uint32_t>(UINT16_MAX, sold[i][branch] + harvested[i][branch]));
       harvested[i][branch] = 0;
       changed = true;
     }
@@ -322,7 +386,9 @@ bool FarmState::careForPlot(const CareAction action, const uint8_t plotIndex) {
     case CareAction::Shade:
       target->sunlight = clampAdd(target->sunlight, enhanced ? 40 : (ownsUpgrade(4) ? 30 : 20));
       break;
-    case CareAction::Weed: target->health = clampAdd(target->health, enhanced ? 35 : 25); break;
+    case CareAction::Weed:
+      target->health = clampAdd(target->health, enhanced ? 35 : 25);
+      break;
     case CareAction::Fertilize:
       if (!enhanced && fertilizerStock == 0) return false;
       if (!enhanced) fertilizerStock--;
@@ -335,7 +401,8 @@ bool FarmState::careForPlot(const CareAction action, const uint8_t plotIndex) {
       break;
   }
   if (enhanced) careCredits--;
-  const uint16_t average = static_cast<uint16_t>(target->moisture + target->sunlight + target->health + target->nutrients) / 4;
+  const uint16_t average =
+      static_cast<uint16_t>(target->moisture + target->sunlight + target->health + target->nutrients) / 4;
   target->careScoreTotal = static_cast<uint16_t>(std::min<uint32_t>(UINT16_MAX, target->careScoreTotal + average));
   target->careSamples++;
   updateBranch(*target);
@@ -408,7 +475,7 @@ void FarmState::resetQuestsIfNeeded(const int32_t localDay) {
     questDay = localDay;
     return;
   }
-  if (pagesToday > 0)
+  if (localDay == questDay + 1 && pagesToday > 0)
     currentStreak++;
   else
     currentStreak = 0;
@@ -424,8 +491,10 @@ void FarmState::resetQuestsIfNeeded(const int32_t localDay) {
 
 QuestProgress FarmState::quest(const uint8_t index) const {
   if (index >= QUEST_COUNT) return {};
-  const uint16_t values[QUEST_COUNT] = {pagesToday, tendsToday, watersToday, maxSessionPages, nightPages,
-                                        currentStreak};
+  const uint16_t displayedStreak =
+      pagesToday > 0 && currentStreak < UINT16_MAX ? static_cast<uint16_t>(currentStreak + 1) : currentStreak;
+  const uint16_t values[QUEST_COUNT] = {pagesToday,      tendsToday, watersToday,
+                                        maxSessionPages, nightPages, displayedStreak};
   return {values[index], QUEST_GOALS[index], QUEST_REWARDS[index], (questClaims & (1U << index)) != 0,
           (questRewardClaims & (1U << index)) != 0};
 }

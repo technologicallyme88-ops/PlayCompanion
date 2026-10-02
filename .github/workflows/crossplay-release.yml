@@ -108,18 +108,27 @@ jobs:
           # new in CrossPlay". A release note is a thing you write.
           generate_release_notes: false
           body: |
-            ## Improved
+            ## Farm and reading
 
-            - X3 and X4 button navigation can select and open the Home farm preview.
-            - The selected farm preview now matches the book's dithered focus bubble.
-            - Buy Seeds uses the shorter `Bag` inventory label.
-            - Android Find checks active-network broadcast addresses for more reliable
-              reader discovery on phone hotspots.
+            - Farm state now loads before wake restoration, preventing plots and
+              progress from resetting after sleep, reboot, or firmware updates.
+            - Farm weather, crop care stats, growth stages, streak quests, and
+              localized weather effects are persisted and restored reliably.
+            - Reading Journal adds calendar date selection and a month-grouped list view.
 
-            ## Fixed
+            ## Games and navigation
 
-            - Android uploads no longer reuse the reader connection before refreshing
-              the file list, avoiding the harmless hexadecimal/chunk parsing warning.
+            - Terminal Hack adds difficulty selection, XP progression, level wins,
+              swipe/page navigation, and precise power-code touch targets.
+            - Home navigation restores the last selected item and includes Farm.
+            - Pokémon tile hit areas and encounter controls are aligned to their visuals.
+            - Multiplayer Knucklebones rematches give the first turn to the prior loser.
+
+            ## Power and compatibility
+
+            - Charger connections preserve the device's existing frontlight state.
+            - Wake restores the active page instead of always returning Home.
+            - X3, X4, and X4 Pro production images are built from the same release.
 
             ## Firmware files
 

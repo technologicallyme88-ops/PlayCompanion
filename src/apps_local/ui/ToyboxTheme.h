@@ -32,6 +32,8 @@ struct Faces {
 // Jersey throughout: the fork's default, used by the Games menu and Chess.
 inline Faces toyboxFaces() { return Faces{}; }
 
+inline Faces terminalFaces() { return Faces{kTerminalMonoFontId, kUiFontId, kDisplayFontId}; }
+
 // Connections speaks Instrument Serif -- chosen because it is the only elegant
 // face also condensed enough to set a long word inside a square tile: Lora,
 // Fraunces and Young Serif all need more than the tile's whole width for

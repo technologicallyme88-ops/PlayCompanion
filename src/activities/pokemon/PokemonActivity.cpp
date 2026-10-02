@@ -162,8 +162,9 @@ bool PokemonActivity::refreshSnapshot() {
 }
 
 void PokemonActivity::setScreen(const Screen screen, const int selected) {
+  const bool encounterNicknameTransition = screen_ == Screen::Event && screen == Screen::NicknameQuestion;
   cleanRefreshNeeded_ =
-      cleanRefreshNeeded_ ||
+      cleanRefreshNeeded_ || encounterNicknameTransition ||
       pokemon::pokemonNeedsCleanRefresh(screen_ == Screen::PokedexDetail, screen == Screen::PokedexDetail, false);
   screen_ = screen;
   selected_ = std::max(0, selected);
@@ -476,8 +477,15 @@ void PokemonActivity::activate() {
         }
         if (!refreshSnapshot()) return;
         if (caught != 0) {
-          nicknamePrompt_ = pokemon::PokemonPromptContext::forCaught(pending.speciesId, caught);
-          snprintf(message_, sizeof(message_), tr(STR_POKEMON_NICKNAME_QUESTION), speciesName(pending.speciesId));
+          pokemon::PokemonRecord caughtRecord{};
+          if (service_.readRecord(caught, caughtRecord) != pokemon::ServiceStatus::Ok ||
+              pokemon::speciesData(caughtRecord.speciesId) == nullptr) {
+            LOG_ERR("PokemonActivity", "Caught record %lu has no valid species", static_cast<unsigned long>(caught));
+            showMessage(tr(STR_POKEMON_LOAD_ERROR), Screen::Menu);
+            return;
+          }
+          nicknamePrompt_ = pokemon::PokemonPromptContext::forCaught(caughtRecord.speciesId, caught);
+          snprintf(message_, sizeof(message_), tr(STR_POKEMON_NICKNAME_QUESTION), speciesName(caughtRecord.speciesId));
           setScreen(Screen::NicknameQuestion);
         } else {
           setScreen(pokemon::pendingEventFront(snapshot_.state) == nullptr ? Screen::Menu : Screen::Event);
@@ -672,6 +680,19 @@ void PokemonActivity::loop() {
       if (touch == MappedInputManager::RowTouch::Tap && row >= 0 && row < 2) {
         selected_ = row;
         activate();
+        return;
+      }
+    } else if (pending != nullptr && pending->kind == pokemon::PendingEventKind::Item) {
+      // Item events render a single OK row, but the generic UI router is
+      // disabled for the event screen. Handle that row explicitly so a tap
+      // on the visible footer acknowledges the item.
+      int row = -1;
+      const auto touch = mappedInput.rowTouch(row, listBounds_.y, rowHeight_, rowCount_, listBounds_.x,
+                                              listBounds_.x + listBounds_.width, rowHeight_);
+      if ((touch == MappedInputManager::RowTouch::Down || touch == MappedInputManager::RowTouch::Tap) &&
+          row == 0) {
+        if (touch == MappedInputManager::RowTouch::Tap) activate();
+        else requestUpdate();
         return;
       }
     }

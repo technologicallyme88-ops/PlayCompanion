@@ -1735,12 +1735,15 @@ void CrossPointWebServer::onWebSocketEvent(uint8_t num, WStype_t type, uint8_t* 
 
       wsUploadReceived += written;
 
-      // Send progress update (every 64KB or at end)
-      if (wsUploadReceived - wsLastProgressSent >= 65536 || wsUploadReceived >= wsUploadSize) {
-        String progress = "PROGRESS:" + String(wsUploadReceived) + ":" + String(wsUploadSize);
-        wsServer->sendTXT(num, progress);
-        wsLastProgressSent = wsUploadReceived;
-      }
+      // This acknowledgement is also flow control for the browser uploader:
+      // it sends the next 4 KB chunk only after the current SD write finishes.
+      // Keeping at most one chunk in flight avoids exhausting the X3's network
+      // heap when a phone can enqueue data faster than the SD card can write it.
+      char progress[48];
+      snprintf(progress, sizeof(progress), "PROGRESS:%u:%u", static_cast<unsigned>(wsUploadReceived),
+               static_cast<unsigned>(wsUploadSize));
+      wsServer->sendTXT(num, progress);
+      wsLastProgressSent = wsUploadReceived;
 
       // Check if upload complete
       if (wsUploadReceived >= wsUploadSize) {

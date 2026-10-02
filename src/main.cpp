@@ -36,6 +36,8 @@
 #include "activities/ActivityManager.h"
 #include "activities/home/HomeActivity.h"
 #include "activities/settings/SdFirmwareUpdateActivity.h"
+#include "apps_local/WakeResume.h"
+#include "apps_local/farm/FarmState.h"
 #include "companion/CompanionState.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
@@ -136,6 +138,8 @@ unsigned long t2 = 0;
 // Definitions for SilentRestart.h. RTC_NOINIT survives ESP.restart() but not power loss.
 RTC_NOINIT_ATTR uint32_t silentRebootMagic;
 RTC_NOINIT_ATTR uint32_t silentRebootTarget;
+RTC_NOINIT_ATTR uint32_t sleepIntentMagic;
+constexpr uint32_t SLEEP_INTENT_MAGIC = 0x534C5031;
 constexpr uint32_t SILENT_REBOOT_MAGIC = 0xC1EAB007;
 constexpr uint32_t SILENT_REBOOT_TARGET_HOME = 0;
 constexpr uint32_t SILENT_REBOOT_TARGET_READER = 1;
@@ -259,7 +263,9 @@ static bool loadSleepFrameBuffer() {
 // Enter deep sleep mode
 void enterDeepSleep(bool fromTimeout = false) {
   HalPowerManager::Lock powerLock;  // Ensure we are at normal CPU frequency for sleep preparation
+  APP_STATE.lastSleepActivity = activityManager.currentActivityName();
   APP_STATE.lastSleepFromReader = activityManager.isReaderActivity();
+  APP_STATE.poweredOff = true;
 
   const bool isQuickResumeSleep =
       SETTINGS.sleepScreen == CrossPointSettings::SLEEP_SCREEN_MODE::QUICK_RESUME ||
@@ -274,6 +280,9 @@ void enterDeepSleep(bool fromTimeout = false) {
   // Commit to sleeping before goToSleep() runs the outgoing activity's onExit():
   // a WiFi activity would otherwise silentRestart() here and reboot instead.
   deepSleepInProgress = true;
+  // A charge-only cable cannot be identified through USB CDC. Keep the user's
+  // off state across the X4 Pro's charger-induced power reset instead.
+  sleepIntentMagic = SLEEP_INTENT_MAGIC;
   activityManager.goToSleep(fromTimeout);
 
   if (isQuickResumeSleep) {
@@ -400,7 +409,14 @@ void setup() {
   halTiltSensor.begin();
   halClock.begin();
 
-  const auto wakeupReason = gpio.getWakeupReason();
+  auto wakeupReason = gpio.getWakeupReason();
+#if defined(ARDUINO_ARCH_ESP32)
+  // Charge-only VBUS is not observable on this board. Do not reinterpret a
+  // power-on reset here: on some Pro revisions the physical power button also
+  // produces POWERON, and must remain a valid wake path.
+#endif
+  if (wakeupReason == HalGPIO::WakeupReason::PowerButton || wakeupReason == HalGPIO::WakeupReason::AfterFlash)
+    sleepIntentMagic = 0;
 
   // Latch the recovery chord before SD and settings I/O. X4 Pro uses a plain
   // digital button with 5 ms debounce; other Xteink inputs retain their legacy
@@ -450,6 +466,7 @@ void setup() {
   OPDS_STORE.loadFromFile();
   // Load reading-companion ledger on every boot/wake so persisted streak/time state is preserved.
   COMPANION_STATE.loadFromFile();
+  FARM_STATE.initializeFromFile();
   UITheme::getInstance().reload();
   ButtonNavigator::setMappedInputManager(mappedInputManager);
   // r11.4 BLE HID host. Keep the controller heap free when the user has Bluetooth off.
@@ -466,6 +483,16 @@ void setup() {
   // the light back exactly as they left it rather than surprising them with darkness.
   const bool restoreLightOn = SETTINGS.frontlightOn != 0 && (SETTINGS.frontlightRestoreOnWake != 0 || isSilentReboot);
   Frontlight.begin(SETTINGS.frontlightBrightness, SETTINGS.frontlightWarmth, restoreLightOn);
+
+  // The X4 Pro has no confirmed VBUS-detect GPIO, so a charge-only cable can
+  // present as a plain power-on reset. The persisted explicit-off bit survives
+  // that reset; a real button wake is ESP_RST_DEEPSLEEP and clears it here.
+  if (wakeupReason == HalGPIO::WakeupReason::PowerButton && esp_reset_reason() == ESP_RST_DEEPSLEEP) {
+    if (APP_STATE.poweredOff) {
+      APP_STATE.poweredOff = false;
+      APP_STATE.saveToFile();
+    }
+  }
 
   switch (wakeupReason) {
     case HalGPIO::WakeupReason::PowerButton:
@@ -484,7 +511,7 @@ void setup() {
       // Sleeping here would strand the device in a USB-replug boot loop.
       break;
 #else
-      powerManager.startDeepSleep(gpio);
+      if (APP_STATE.poweredOff) powerManager.startDeepSleep(gpio);
       break;
 #endif
     case HalGPIO::WakeupReason::AfterFlash:
@@ -563,6 +590,25 @@ void setup() {
     // through to the sleep-wake "resume reader" logic, which fires on stale
     // openEpubPath + lastSleepFromReader from a prior session.
     activityManager.goHome();
+  } else if (resume == BootResume::SplashlessWake && !APP_STATE.lastSleepFromReader &&
+             APP_STATE.lastSleepActivity == "Home") {
+    if (resume == BootResume::SplashlessWake) HomeActivity::notePanelHoldsRetainedFrame();
+    activityManager.goHome();
+  } else if (resume == BootResume::SplashlessWake && !APP_STATE.lastSleepFromReader &&
+             APP_STATE.lastSleepActivity == "FileBrowser") {
+    activityManager.goToFileBrowser("/");
+  } else if (resume == BootResume::SplashlessWake && !APP_STATE.lastSleepFromReader &&
+             APP_STATE.lastSleepActivity == "RecentBooks") {
+    activityManager.goToRecentBooks();
+  } else if (resume == BootResume::SplashlessWake && !APP_STATE.lastSleepFromReader &&
+             APP_STATE.lastSleepActivity == "OpdsBookBrowser") {
+    activityManager.goToBrowser();
+  } else if (resume == BootResume::SplashlessWake && !APP_STATE.lastSleepFromReader &&
+             APP_STATE.lastSleepActivity == "Settings") {
+    activityManager.goToSettings();
+  } else if (resume == BootResume::SplashlessWake && !APP_STATE.lastSleepFromReader &&
+             wake_resume::open(APP_STATE.lastSleepActivity.c_str(), renderer, mappedInputManager)) {
+    // Local apps restore their own persisted in-app state where available.
   } else if (APP_STATE.openEpubPath.empty() || !APP_STATE.lastSleepFromReader ||
              mappedInputManager.isPressed(MappedInputManager::Button::Back) || APP_STATE.readerActivityLoadCount > 0) {
     // Boot to home screen if no book is open, last sleep was not from reader, back button is held, or reader activity

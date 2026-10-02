@@ -216,4 +216,9 @@ inline int winner(const Game& game) {
   return a > b ? 0 : 1;
 }
 
+inline bool rematchGoesFirst(const Game& game, const int seat, const bool drawFallback) {
+  const int won = winner(game);
+  return won < 0 ? drawFallback : seat == 1 - won;
+}
+
 }  // namespace knucklebones

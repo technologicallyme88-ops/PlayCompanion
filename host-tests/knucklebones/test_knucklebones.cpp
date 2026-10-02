@@ -170,6 +170,21 @@ void testTheWinnerIsTheHigherTotal() {
   CHECK(winner(game) == -1);
 }
 
+void testRematchStartsWithPriorLoser() {
+  Game game{};
+  const uint8_t winning[kColumns][kRows] = {{6, 6, 6}, {5, 5, 5}, {4, 4, 4}};
+  const uint8_t losing[kColumns][kRows] = {{1, 1, 1}, {2, 2, 2}, {3, 3, 3}};
+  game.grid[0] = gridOf(winning);
+  game.grid[1] = gridOf(losing);
+  CHECK(winner(game) == 0);
+  CHECK(!rematchGoesFirst(game, 0, true));
+  CHECK(rematchGoesFirst(game, 1, false));
+
+  game.grid[1] = game.grid[0];
+  CHECK(rematchGoesFirst(game, 0, true));
+  CHECK(!rematchGoesFirst(game, 1, false));
+}
+
 void testTheSameSeedDealsTheSameGame() {
   Game a{};
   Game b{};
@@ -573,6 +588,7 @@ int main() {
   testAFullColumnRefusesAndChangesNothing();
   testTheGameEndsWhenEitherGridFills();
   testTheWinnerIsTheHigherTotal();
+  testRematchStartsWithPriorLoser();
   testTheSameSeedDealsTheSameGame();
   testRandomMatchesHoldEveryInvariant();
   testBackIsTotalAndAlwaysReachesTheTop();

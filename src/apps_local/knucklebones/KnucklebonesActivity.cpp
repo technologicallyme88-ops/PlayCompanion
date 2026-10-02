@@ -9,10 +9,10 @@
 
 #include "../Shelf.h"
 #include "../player/PlayerName.h"
+#include "../ui/GameButtonPointer.h"
 #include "../ui/Toybox.h"
 #include "../ui/ToyboxFonts.h"
 #include "../ui/ToyboxTheme.h"
-#include "../ui/GameButtonPointer.h"
 #include "KnucklebonesBrain.h"
 #include "KnucklebonesScreens.h"
 
@@ -177,8 +177,9 @@ bool KnucklebonesActivity::takeOpponentState() {
 }
 
 void KnucklebonesActivity::onRematch() {
-  // The note handshake keeps the transport turn; its next sender deals.
-  onMatchStart(linkYourTurn());
+  // Seat zero receives the first roll. Re-seat the prior loser there; a draw
+  // has no loser, so it keeps the transport's existing starter.
+  onMatchStart(kb::rematchGoesFirst(game, seat, linkYourTurn()));
 }
 
 void KnucklebonesActivity::onLinkEnded() {
@@ -263,17 +264,26 @@ void KnucklebonesActivity::gameLoop() {
   // Left/Right (and side Up/Down via NavPrevious/NavNext) move between pages.
   if (!mappedInput.hasTouch() && screen == kb::Screen::HowTo) {
     if (mappedInput.wasReleased(MappedInputManager::Button::NavPrevious)) {
-      if (howToPage > 0) { --howToPage; requestUpdate(); }
+      if (howToPage > 0) {
+        --howToPage;
+        requestUpdate();
+      }
       return;
     }
     if (mappedInput.wasReleased(MappedInputManager::Button::NavNext)) {
-      if (howToPage + 1 < knuckleui::howToPages()) { ++howToPage; requestUpdate(); }
-      else goTo(kb::Screen::Menu);
+      if (howToPage + 1 < knuckleui::howToPages()) {
+        ++howToPage;
+        requestUpdate();
+      } else
+        goTo(kb::Screen::Menu);
       return;
     }
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-      if (howToPage + 1 < knuckleui::howToPages()) { ++howToPage; requestUpdate(); }
-      else goTo(kb::Screen::Menu);
+      if (howToPage + 1 < knuckleui::howToPages()) {
+        ++howToPage;
+        requestUpdate();
+      } else
+        goTo(kb::Screen::Menu);
       return;
     }
     return;
@@ -283,8 +293,10 @@ void KnucklebonesActivity::gameLoop() {
   // Back keeps its normal flow behavior above. No pointer is needed.
   if (!mappedInput.hasTouch() && screen == kb::Screen::Result) {
     if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
-      if (inMatch()) proposeRematch();
-      else beginSoloMatch();
+      if (inMatch())
+        proposeRematch();
+      else
+        beginSoloMatch();
     }
     return;
   }
@@ -415,7 +427,8 @@ void KnucklebonesActivity::drawLinkArt(const Rect& area) {
   style.align = fui::TextAlign::Center;
   const int lineHeight = 24;
   char text[64];
-  std::snprintf(text, sizeof(text), "FINAL: YOU %d   THEM %d", kb::score(game.grid[seat]), kb::score(game.grid[1 - seat]));
+  std::snprintf(text, sizeof(text), "FINAL: YOU %d   THEM %d", kb::score(game.grid[seat]),
+                kb::score(game.grid[1 - seat]));
   target.text(fui::makeRect(area.x, area.y, area.width, lineHeight), text, style);
   target.text(fui::makeRect(area.x, area.y + lineHeight, area.width, lineHeight), "AGAINST THIS PLAYER", style);
   std::snprintf(text, sizeof(text), "W %lu   L %lu   D %lu", static_cast<unsigned long>(opponentRecord.wins),
@@ -485,9 +498,9 @@ void KnucklebonesActivity::gameRender() {
 
   const bool buttonOnly = !mappedInput.hasTouch();
   const bool buttonBoard = screen == kb::Screen::Board && buttonOnly;
-  const auto labels = buttonBoard ? mappedInput.mapLabels("Back", "Select", "<", ">")
-                                  : buttonOnly ? mappedInput.mapLabels("Back", "Select", "Prev", "Next")
-                                               : mappedInput.mapLabels("Back", "", "", "");
+  const auto labels = buttonBoard  ? mappedInput.mapLabels("Back", "Select", "<", ">")
+                      : buttonOnly ? mappedInput.mapLabels("Back", "Select", "Prev", "Next")
+                                   : mappedInput.mapLabels("Back", "", "", "");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   if (!buttonOnly) gameinput::drawPointer(renderer, mappedInput);
   renderer.displayBuffer();

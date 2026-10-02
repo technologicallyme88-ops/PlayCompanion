@@ -82,5 +82,6 @@ flake.*
 # Android/Gradle machine-local build artifacts
 /android/.gradle-user-home/
 /android/.gradle/
+/android/.kotlin/
 /gradle-release-cache/
 /android/local.properties

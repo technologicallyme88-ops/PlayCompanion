@@ -9,6 +9,7 @@
 #include <cstdio>
 
 #include "FarmState.h"
+#include "FarmWeather.h"
 #include "components/UITheme.h"
 #include "fontIds.h"
 
@@ -19,33 +20,31 @@ constexpr int FOOTER = 42;
 constexpr int DETAIL_GAP = 3;
 constexpr uint16_t UPGRADE_PRICES[5] = {250, 400, 500, 650, 300};
 
-const StrId CROP_NAMES[CROP_COUNT] = {
-    StrId::STR_FARM_CROP_PARSNIP, StrId::STR_FARM_CROP_CAULIFLOWER, StrId::STR_FARM_CROP_BLUEBERRY,
-    StrId::STR_FARM_CROP_MELON, StrId::STR_FARM_CROP_CORN, StrId::STR_FARM_CROP_PUMPKIN,
-    StrId::STR_FARM_CROP_WINTER_ROOT, StrId::STR_FARM_CROP_SNOW_YAM};
+const StrId CROP_NAMES[CROP_COUNT] = {StrId::STR_FARM_CROP_PARSNIP,     StrId::STR_FARM_CROP_CAULIFLOWER,
+                                      StrId::STR_FARM_CROP_BLUEBERRY,   StrId::STR_FARM_CROP_MELON,
+                                      StrId::STR_FARM_CROP_CORN,        StrId::STR_FARM_CROP_PUMPKIN,
+                                      StrId::STR_FARM_CROP_WINTER_ROOT, StrId::STR_FARM_CROP_SNOW_YAM};
 
 const StrId MENU_NAMES[7] = {StrId::STR_FARM_BUY_SEEDS, StrId::STR_FARM_HARVEST, StrId::STR_FARM_SELL_CROPS,
-                               StrId::STR_FARM_CARE, StrId::STR_FARM_SHOP, StrId::STR_FARM_QUESTS,
-                               StrId::STR_FARM_HERBARIUM};
+                             StrId::STR_FARM_CARE,      StrId::STR_FARM_SHOP,    StrId::STR_FARM_QUESTS,
+                             StrId::STR_FARM_HERBARIUM};
 
 const StrId CARE_NAMES[5] = {StrId::STR_FARM_WATER, StrId::STR_FARM_SHADE, StrId::STR_FARM_WEED,
-                              StrId::STR_FARM_FERTILIZE, StrId::STR_FARM_TEND};
+                             StrId::STR_FARM_FERTILIZE, StrId::STR_FARM_TEND};
 const StrId CARE_HELP[5] = {StrId::STR_FARM_CARE_WATER_HELP, StrId::STR_FARM_CARE_SHADE_HELP,
-                             StrId::STR_FARM_CARE_WEED_HELP, StrId::STR_FARM_CARE_FERTILIZE_HELP,
-                             StrId::STR_FARM_CARE_TEND_HELP};
-const StrId SHOP_NAMES[5] = {StrId::STR_FARM_MOSS_POLE, StrId::STR_FARM_SELF_WATERING,
-                              StrId::STR_FARM_SLOW_FERTILIZER, StrId::STR_FARM_GREENHOUSE,
-                              StrId::STR_FARM_PREMIUM_SPRAYER};
+                            StrId::STR_FARM_CARE_WEED_HELP, StrId::STR_FARM_CARE_FERTILIZE_HELP,
+                            StrId::STR_FARM_CARE_TEND_HELP};
+const StrId SHOP_NAMES[5] = {StrId::STR_FARM_MOSS_POLE, StrId::STR_FARM_SELF_WATERING, StrId::STR_FARM_SLOW_FERTILIZER,
+                             StrId::STR_FARM_GREENHOUSE, StrId::STR_FARM_PREMIUM_SPRAYER};
 const StrId SHOP_HELP[5] = {StrId::STR_FARM_SHOP_MOSS_HELP, StrId::STR_FARM_SHOP_WATER_HELP,
-                             StrId::STR_FARM_SHOP_FERTILIZER_HELP, StrId::STR_FARM_SHOP_GREENHOUSE_HELP,
-                             StrId::STR_FARM_SHOP_SPRAYER_HELP};
-const StrId QUEST_NAMES[QUEST_COUNT] = {StrId::STR_FARM_QUEST_READ, StrId::STR_FARM_QUEST_TEND,
-                                         StrId::STR_FARM_QUEST_WATER, StrId::STR_FARM_QUEST_SPEEDY,
-                                         StrId::STR_FARM_QUEST_NIGHT, StrId::STR_FARM_QUEST_STREAK};
+                            StrId::STR_FARM_SHOP_FERTILIZER_HELP, StrId::STR_FARM_SHOP_GREENHOUSE_HELP,
+                            StrId::STR_FARM_SHOP_SPRAYER_HELP};
+const StrId QUEST_NAMES[QUEST_COUNT] = {StrId::STR_FARM_QUEST_READ,  StrId::STR_FARM_QUEST_TEND,
+                                        StrId::STR_FARM_QUEST_WATER, StrId::STR_FARM_QUEST_SPEEDY,
+                                        StrId::STR_FARM_QUEST_NIGHT, StrId::STR_FARM_QUEST_STREAK};
 const StrId QUEST_HELP[QUEST_COUNT] = {
-    StrId::STR_FARM_QUEST_READ_HELP,   StrId::STR_FARM_QUEST_TEND_HELP,
-    StrId::STR_FARM_QUEST_WATER_HELP,  StrId::STR_FARM_QUEST_SPEEDY_HELP,
-    StrId::STR_FARM_QUEST_NIGHT_HELP,  StrId::STR_FARM_QUEST_STREAK_HELP,
+    StrId::STR_FARM_QUEST_READ_HELP,   StrId::STR_FARM_QUEST_TEND_HELP,  StrId::STR_FARM_QUEST_WATER_HELP,
+    StrId::STR_FARM_QUEST_SPEEDY_HELP, StrId::STR_FARM_QUEST_NIGHT_HELP, StrId::STR_FARM_QUEST_STREAK_HELP,
 };
 
 const char* branchName(const CropBranch branch) {
@@ -70,11 +69,18 @@ FarmActivity::FarmActivity(GfxRenderer& renderer, MappedInputManager& mappedInpu
 
 void FarmActivity::onEnter() {
   Activity::onEnter();
+  FARM_STATE.initializeFromFile();
+  // Keep the optional crop-art location available on fresh cards. The theme
+  // still has a built-in four-stage renderer when no bitmap pack is installed.
+  Storage.mkdir("/.crosspoint/harvest");
+  Storage.mkdir("/.crosspoint/harvest/crops");
+  refreshWeatherIfDue();
   setScreen(Screen::Menu);
 }
 
 void FarmActivity::setScreen(const Screen screen, const int selection) {
   screen_ = screen;
+  if (screen == Screen::Care) careStatsPlot_ = selectedPlot_;
   selected_ = std::clamp(selection, 0, std::max(0, itemCount() - 1));
   if (screen != Screen::Menu) plotSelectionArmed_ = false;
   feedback_[0] = '\0';
@@ -84,15 +90,24 @@ void FarmActivity::setScreen(const Screen screen, const int selection) {
 
 int FarmActivity::itemCount() const {
   switch (screen_) {
-    case Screen::Menu: return 7;
-    case Screen::Seeds: return 2;
-    case Screen::Harvest: return 1;
-    case Screen::Sell: return 1;
-    case Screen::Care: return 5;
-    case Screen::Shop: return 8;
-    case Screen::Quests: return QUEST_COUNT;
-    case Screen::Herbarium: return CROP_COUNT;
-    case Screen::HerbDetail: return 0;
+    case Screen::Menu:
+      return 7;
+    case Screen::Seeds:
+      return 2;
+    case Screen::Harvest:
+      return 1;
+    case Screen::Sell:
+      return 1;
+    case Screen::Care:
+      return 5;
+    case Screen::Shop:
+      return 8;
+    case Screen::Quests:
+      return QUEST_COUNT;
+    case Screen::Herbarium:
+      return CROP_COUNT;
+    case Screen::HerbDetail:
+      return 0;
   }
   return 0;
 }
@@ -102,15 +117,23 @@ int FarmActivity::firstVisible() const { return selected_ / rowsPerPage() * rows
 
 const char* FarmActivity::title() const {
   switch (screen_) {
-    case Screen::Menu: return tr(STR_FARM);
-    case Screen::Seeds: return tr(STR_FARM_BUY_SEEDS);
-    case Screen::Harvest: return tr(STR_FARM_HARVEST);
-    case Screen::Sell: return tr(STR_FARM_SELL_CROPS);
-    case Screen::Care: return tr(STR_FARM_CARE);
-    case Screen::Shop: return tr(STR_FARM_SHOP);
-    case Screen::Quests: return tr(STR_FARM_QUESTS);
+    case Screen::Menu:
+      return tr(STR_FARM);
+    case Screen::Seeds:
+      return tr(STR_FARM_BUY_SEEDS);
+    case Screen::Harvest:
+      return tr(STR_FARM_HARVEST);
+    case Screen::Sell:
+      return tr(STR_FARM_SELL_CROPS);
+    case Screen::Care:
+      return tr(STR_FARM_CARE);
+    case Screen::Shop:
+      return tr(STR_FARM_SHOP);
+    case Screen::Quests:
+      return tr(STR_FARM_QUESTS);
     case Screen::Herbarium:
-    case Screen::HerbDetail: return tr(STR_FARM_HERBARIUM);
+    case Screen::HerbDetail:
+      return tr(STR_FARM_HERBARIUM);
   }
   return tr(STR_FARM);
 }
@@ -138,8 +161,8 @@ void FarmActivity::saveIfChanged(const bool changed, const char* unchangedFeedba
 void FarmActivity::activate() {
   switch (screen_) {
     case Screen::Menu: {
-      static constexpr Screen destinations[7] = {Screen::Seeds, Screen::Harvest, Screen::Sell, Screen::Care,
-                                                  Screen::Shop, Screen::Quests, Screen::Herbarium};
+      static constexpr Screen destinations[7] = {Screen::Seeds, Screen::Harvest, Screen::Sell,     Screen::Care,
+                                                 Screen::Shop,  Screen::Quests,  Screen::Herbarium};
       setScreen(destinations[selected_]);
       break;
     }
@@ -148,8 +171,12 @@ void FarmActivity::activate() {
       saveIfChanged(FARM_STATE.buySeedAndPlant(cropId));
       break;
     }
-    case Screen::Harvest: saveIfChanged(FARM_STATE.harvestAll(), tr(STR_FARM_NOTHING_TO_HARVEST)); break;
-    case Screen::Sell: saveIfChanged(FARM_STATE.sellAll()); break;
+    case Screen::Harvest:
+      saveIfChanged(FARM_STATE.harvestAll(), tr(STR_FARM_NOTHING_TO_HARVEST));
+      break;
+    case Screen::Sell:
+      saveIfChanged(FARM_STATE.sellAll());
+      break;
     case Screen::Care:
       saveIfChanged(FARM_STATE.careForPlot(static_cast<CareAction>(selected_), selectedPlot_));
       break;
@@ -170,8 +197,11 @@ void FarmActivity::activate() {
       herbCrop_ = static_cast<uint8_t>(selected_ + 1);
       setScreen(Screen::HerbDetail);
       break;
-    case Screen::Quests: saveIfChanged(FARM_STATE.claimQuest(static_cast<uint8_t>(selected_))); break;
-    case Screen::HerbDetail: break;
+    case Screen::Quests:
+      saveIfChanged(FARM_STATE.claimQuest(static_cast<uint8_t>(selected_)));
+      break;
+    case Screen::HerbDetail:
+      break;
   }
 }
 
@@ -179,8 +209,8 @@ bool FarmActivity::handleTap() {
   int x = 0;
   int y = 0;
   if (!mappedInput.wasScreenTapped(x, y)) return false;
-  if (screen_ == Screen::Menu && x >= farmPreviewX_ && x < farmPreviewX_ + farmPreviewW_ &&
-      y >= farmPreviewY_ && y < farmPreviewY_ + farmPreviewH_) {
+  if (screen_ == Screen::Menu && x >= farmPreviewX_ && x < farmPreviewX_ + farmPreviewW_ && y >= farmPreviewY_ &&
+      y < farmPreviewY_ + farmPreviewH_) {
     const int column = (x - farmPreviewX_) * 2 / farmPreviewW_;
     const int row = (y - farmPreviewY_) * 2 / farmPreviewH_;
     const uint8_t tappedPlot = static_cast<uint8_t>(std::clamp(row * 2 + column, 0, PLOT_COUNT - 1));
@@ -218,8 +248,7 @@ void FarmActivity::loop() {
     return;
   }
   if (screen_ == Screen::HerbDetail) {
-    if (swipe == MappedInputManager::SwipeDir::Up ||
-        mappedInput.wasReleased(MappedInputManager::Button::Right)) {
+    if (swipe == MappedInputManager::SwipeDir::Up || mappedInput.wasReleased(MappedInputManager::Button::Right)) {
       herbCrop_ = static_cast<uint8_t>(herbCrop_ % CROP_COUNT + 1);
       requestUpdate();
     } else if (swipe == MappedInputManager::SwipeDir::Down ||
@@ -260,24 +289,33 @@ void FarmActivity::drawRow(const int row, const int logicalIndex, const char* la
 void FarmActivity::renderFarmOverview() {
   const int sw = renderer.getScreenWidth();
   renderer.drawText(UI_12_FONT_ID, SIDE + 6, 29, tr(STR_FARM), true, EpdFontFamily::BOLD);
+  static constexpr StrId WEATHER_NAMES[] = {StrId::STR_FARM_WEATHER_NORMAL, StrId::STR_FARM_WEATHER_CLOUDY,
+                                            StrId::STR_FARM_WEATHER_RAINY, StrId::STR_FARM_WEATHER_SNOWY};
+  char weatherLine[48];
+  const auto weather = FARM_STATE.weatherEffect();
+  snprintf(weatherLine, sizeof(weatherLine), "%s: %s", tr(STR_FARM_WEATHER),
+           I18N.get(WEATHER_NAMES[static_cast<uint8_t>(weather)]));
+  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 54, weatherLine);
   char line[96];
   snprintf(line, sizeof(line), "%s: %u", tr(STR_FARM_COINS), FARM_STATE.coinBalance());
-  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 69, line);
+  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 78, line);
   snprintf(line, sizeof(line), "%s: %u/3", tr(STR_FARM_WATER_STOCK), FARM_STATE.waterCharges());
-  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 91, line);
+  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 100, line);
   snprintf(line, sizeof(line), "%s: %u/3", tr(STR_FARM_FERTILIZER_STOCK), FARM_STATE.fertilizerCharges());
-  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 113, line);
+  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 122, line);
+  renderer.drawLine(SIDE + 6, 148, 148, 148, 1, true);
   const Plot& plot = FARM_STATE.getPlots()[selectedPlot_];
   snprintf(line, sizeof(line), "%s %u", tr(STR_FARM_PLOT), selectedPlot_ + 1);
-  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 144, line, true, EpdFontFamily::BOLD);
-  snprintf(line, sizeof(line), "%s: %u", tr(STR_FARM_MOISTURE), plot.moisture);
-  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 166, line);
-  snprintf(line, sizeof(line), "%s: %u", tr(STR_FARM_LIGHT), plot.sunlight);
-  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 188, line);
-  snprintf(line, sizeof(line), "%s: %u", tr(STR_FARM_HEALTH), plot.health);
-  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 210, line);
-  snprintf(line, sizeof(line), "%s: %u", tr(STR_FARM_NUTRIENTS), plot.nutrients);
-  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 232, line);
+  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 158, line, true, EpdFontFamily::BOLD);
+  const bool emptyPlot = plot.cropId == 0;
+  snprintf(line, sizeof(line), emptyPlot ? "%s: -" : "%s: %u", tr(STR_FARM_MOISTURE), plot.moisture);
+  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 178, line);
+  snprintf(line, sizeof(line), emptyPlot ? "%s: -" : "%s: %u", tr(STR_FARM_LIGHT), plot.sunlight);
+  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 198, line);
+  snprintf(line, sizeof(line), emptyPlot ? "%s: -" : "%s: %u", tr(STR_FARM_HEALTH), plot.health);
+  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 218, line);
+  snprintf(line, sizeof(line), emptyPlot ? "%s: -" : "%s: %u", tr(STR_FARM_NUTRIENTS), plot.nutrients);
+  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 238, line);
 
   farmPreviewX_ = 174;
   farmPreviewY_ = 18;
@@ -312,8 +350,8 @@ void FarmActivity::renderList() {
         const uint8_t cropId = static_cast<uint8_t>(FARM_STATE.season() * 2 + i + 1);
         const auto& crop = FarmState::crop(cropId);
         snprintf(label, sizeof(label), "%s", I18N.get(CROP_NAMES[cropId - 1]));
-        snprintf(detail, sizeof(detail), "%s: %u %s  |  %s: %u %s  |  %s: %u", tr(STR_FARM_BUY_PRICE),
-                 crop.seedPrice, tr(STR_FARM_COIN), tr(STR_FARM_GROWTH_TIME), crop.growDays, tr(STR_FARM_DAYS),
+        snprintf(detail, sizeof(detail), "%s: %u %s  |  %s: %u %s  |  %s: %u", tr(STR_FARM_BUY_PRICE), crop.seedPrice,
+                 tr(STR_FARM_COIN), tr(STR_FARM_GROWTH_TIME), crop.growDays, tr(STR_FARM_DAYS),
                  tr(STR_FARM_SEEDS_BOUGHT), FARM_STATE.seedsPurchased(cropId));
         enabled = FARM_STATE.coinBalance() >= crop.seedPrice;
         break;
@@ -345,8 +383,7 @@ void FarmActivity::renderList() {
           snprintf(label, sizeof(label), "%s (%u/3)", tr(STR_FARM_REFILL_WATER), FARM_STATE.waterCharges());
           snprintf(detail, sizeof(detail), "%s", tr(STR_FARM_FREE));
         } else if (i == 6) {
-          snprintf(label, sizeof(label), "%s (%u/3)", tr(STR_FARM_RESTOCK_FERTILIZER),
-                   FARM_STATE.fertilizerCharges());
+          snprintf(label, sizeof(label), "%s (%u/3)", tr(STR_FARM_RESTOCK_FERTILIZER), FARM_STATE.fertilizerCharges());
           snprintf(detail, sizeof(detail), "30 %s", tr(STR_FARM_COIN));
         } else {
           snprintf(label, sizeof(label), "%s %u", tr(STR_FARM_BUY_PLOT), FARM_STATE.ownedPlots() + 1);
@@ -370,18 +407,19 @@ void FarmActivity::renderList() {
         snprintf(label, sizeof(label), "%s", I18N.get(CROP_NAMES[i]));
         snprintf(detail, sizeof(detail), "%s: %u/4  |  %s: %u", tr(STR_FARM_DISCOVERED), known,
                  tr(STR_FARM_LIFETIME_SOLD),
-                 FARM_STATE.soldCount(cropId, CropBranch::Default) +
-                     FARM_STATE.soldCount(cropId, CropBranch::Scholar) + FARM_STATE.soldCount(cropId, CropBranch::Wild));
+                 FARM_STATE.soldCount(cropId, CropBranch::Default) + FARM_STATE.soldCount(cropId, CropBranch::Scholar) +
+                     FARM_STATE.soldCount(cropId, CropBranch::Wild));
         break;
       }
-      case Screen::HerbDetail: break;
+      case Screen::HerbDetail:
+        break;
     }
     drawRow(row, i, label, detail, enabled);
   }
 }
 
-void FarmActivity::drawStageArt(const int x, const int y, const int size, const uint8_t cropId,
-                                const uint8_t stage, const bool known) {
+void FarmActivity::drawStageArt(const int x, const int y, const int size, const uint8_t cropId, const uint8_t stage,
+                                const bool known) {
   renderer.drawRect(x, y, size, size, 1, true);
   if (!known) {
     UITheme::drawCenteredText(renderer, Rect{x, y, size, size}, UI_12_FONT_ID, y + size / 2 - 12, "?");
@@ -401,15 +439,32 @@ void FarmActivity::drawStageArt(const int x, const int y, const int size, const 
     }
   }
   Bitmap bitmap(file);
-  if (bitmap.parseHeaders() == BmpReaderError::Ok) renderer.drawBitmap(bitmap, x + 3, y + 3, size - 6, size - 6, 0, 0);
+  if (bitmap.parseHeaders() == BmpReaderError::Ok) {
+    const int available = size - 6;
+    const int sourceWidth = bitmap.getWidth();
+    const int sourceHeight = bitmap.getHeight();
+    int renderedWidth = sourceWidth;
+    int renderedHeight = sourceHeight;
+    if (sourceWidth > available || sourceHeight > available) {
+      if (sourceWidth >= sourceHeight) {
+        renderedWidth = available;
+        renderedHeight = std::max(1, sourceHeight * available / sourceWidth);
+      } else {
+        renderedHeight = available;
+        renderedWidth = std::max(1, sourceWidth * available / sourceHeight);
+      }
+    }
+    const int artX = x + (size - renderedWidth) / 2;
+    const int artY = y + (size - renderedHeight) / 2;
+    renderer.drawBitmap(bitmap, artX, artY, available, available, 0, 0);
+  }
 }
 
 void FarmActivity::renderHerbDetail() {
   const int sw = renderer.getScreenWidth();
   const int index = herbCrop_ - 1;
   constexpr int contentShift = 26;
-  renderer.drawCenteredText(UI_12_FONT_ID, 72 + contentShift, I18N.get(CROP_NAMES[index]), true,
-                            EpdFontFamily::BOLD);
+  renderer.drawCenteredText(UI_12_FONT_ID, 72 + contentShift, I18N.get(CROP_NAMES[index]), true, EpdFontFamily::BOLD);
   const int gap = 8;
   const int size = (sw - SIDE * 2 - gap * 3) / 4;
   for (uint8_t stage = 1; stage <= 4; ++stage) {
@@ -426,8 +481,7 @@ void FarmActivity::renderHerbDetail() {
   int y = 250 + contentShift;
   char line[96];
   snprintf(line, sizeof(line), "%s: %s", tr(STR_FARM_BUY_PRICE), bought ? "" : tr(STR_FARM_UNKNOWN));
-  if (bought)
-    snprintf(line, sizeof(line), "%s: %u %s", tr(STR_FARM_BUY_PRICE), crop.seedPrice, tr(STR_FARM_COIN));
+  if (bought) snprintf(line, sizeof(line), "%s: %u %s", tr(STR_FARM_BUY_PRICE), crop.seedPrice, tr(STR_FARM_COIN));
   renderer.drawText(UI_12_FONT_ID, SIDE, y, line, true, EpdFontFamily::BOLD);
   y += 52;
   snprintf(line, sizeof(line), "%s: %s  |  %s: %u %s", tr(STR_FARM_SEASON), seasonName(crop.season),
@@ -440,8 +494,7 @@ void FarmActivity::renderHerbDetail() {
     snprintf(line, sizeof(line), "%s: %s", branchName(branchId), sold ? "" : tr(STR_FARM_UNKNOWN));
     if (sold)
       snprintf(line, sizeof(line), "%s: %u %s  |  %s: %u", branchName(branchId),
-               FARM_STATE.branchSellPrice(herbCrop_, branchId), tr(STR_FARM_COIN),
-               tr(STR_FARM_LIFETIME_SOLD), sold);
+               FARM_STATE.branchSellPrice(herbCrop_, branchId), tr(STR_FARM_COIN), tr(STR_FARM_LIFETIME_SOLD), sold);
     renderer.drawText(UI_12_FONT_ID, SIDE, y, line, true, EpdFontFamily::BOLD);
     y += 54;
   }
@@ -476,6 +529,23 @@ void FarmActivity::render(RenderLock&&) {
     rowHeight_ = screen_ == Screen::Care || screen_ == Screen::Shop ? 72 : 64;
     visibleRows_ = std::max(1, available / rowHeight_);
     renderList();
+    if (screen_ == Screen::Care) {
+      const Plot& plot = FARM_STATE.getPlots()[careStatsPlot_];
+      if (plot.cropId != 0) {
+        const int statsY = listTop_ + itemCount() * rowHeight_ + 8;
+        char stats[96];
+        snprintf(stats, sizeof(stats), "%s %u", tr(STR_FARM_PLOT), careStatsPlot_ + 1);
+        renderer.drawText(SMALL_FONT_ID, SIDE, statsY, stats, true, EpdFontFamily::BOLD);
+        snprintf(stats, sizeof(stats), "%s: %u", tr(STR_FARM_MOISTURE), plot.moisture);
+        renderer.drawText(SMALL_FONT_ID, SIDE, statsY + 20, stats);
+        snprintf(stats, sizeof(stats), "%s: %u", tr(STR_FARM_LIGHT), plot.sunlight);
+        renderer.drawText(SMALL_FONT_ID, SIDE, statsY + 40, stats);
+        snprintf(stats, sizeof(stats), "%s: %u", tr(STR_FARM_HEALTH), plot.health);
+        renderer.drawText(SMALL_FONT_ID, SIDE, statsY + 60, stats);
+        snprintf(stats, sizeof(stats), "%s: %u", tr(STR_FARM_NUTRIENTS), plot.nutrients);
+        renderer.drawText(SMALL_FONT_ID, SIDE, statsY + 80, stats);
+      }
+    }
   }
   if (feedback_[0]) renderer.drawText(SMALL_FONT_ID, SIDE, sh - FOOTER - 42, feedback_.data());
   if (screen_ == Screen::Care) {
@@ -483,8 +553,8 @@ void FarmActivity::render(RenderLock&&) {
     snprintf(credits, sizeof(credits), "%s: %u/5", tr(STR_FARM_CARE_CREDITS), FARM_STATE.careCreditCount());
     renderer.drawText(SMALL_FONT_ID, SIDE, sh - FOOTER - 20, credits);
   }
-  const auto labels = mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_FARM_PREVIOUS_CROP),
-                                            tr(STR_FARM_NEXT_CROP));
+  const auto labels =
+      mappedInput.mapLabels(tr(STR_BACK), tr(STR_SELECT), tr(STR_FARM_PREVIOUS_CROP), tr(STR_FARM_NEXT_CROP));
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
   renderer.displayBuffer(cleanRefreshNeeded_ ? HalDisplay::HALF_REFRESH : HalDisplay::FAST_REFRESH);
   cleanRefreshNeeded_ = false;

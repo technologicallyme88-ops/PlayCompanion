@@ -4,6 +4,8 @@
 #include <HalClock.h>
 #include <Logging.h>
 #include <Memory.h>
+#include <CompanionMood.h>
+#include <Arduino.h>
 
 #include "CrossPointSettings.h"
 
@@ -16,7 +18,10 @@ namespace journal {
 namespace {
 
 constexpr char kPath[] = "/.crosspoint/reading-journal.bin";
+constexpr char kStatsPath[] = "/.crosspoint/reading-stats.bin";
+constexpr char kStatsTmpPath[] = "/.crosspoint/reading-stats.bin.tmp";
 constexpr uint32_t kMagic = 0x314A5243;  // CRJ1
+constexpr uint32_t kStatsMagic = 0x31535243;  // CRS1
 constexpr uint32_t kEarliestValidEpoch = 1577836800u;  // 2020-01-01
 
 struct Header {
@@ -24,6 +29,96 @@ struct Header {
   uint16_t count;
   uint16_t entrySize;
 };
+
+// Layout written before per-book analytics were introduced. Header::entrySize
+// lets current firmware migrate it without discarding the user's journal.
+struct LegacyEntry {
+  char path[kPathBytes] = {};
+  char title[kTitleBytes] = {};
+  char author[kAuthorBytes] = {};
+  uint32_t startedAt = 0;
+  uint32_t finishedAt = 0;
+  uint8_t rating = 0;
+};
+
+struct StatsFile {
+  uint32_t magic = kStatsMagic;
+  uint16_t version = 1;
+  uint16_t size = 0;
+  Stats stats{};
+  int32_t lastReadDay = companion::DayLedger::NEVER;
+};
+
+struct ActiveSession {
+  companion::SessionAccumulator accumulator;
+  char path[kPathBytes] = {};
+  uint32_t startedSeconds = 0;
+  uint32_t openingSeconds = 0;
+  uint32_t pageTurns = 0;
+  uint8_t localHour = 0;
+  uint8_t weekday = 0;
+  int32_t localDay = companion::DayLedger::NEVER;
+  bool active = false;
+};
+
+StatsFile statsFile;
+bool statsLoaded = false;
+ActiveSession activeSession;
+
+uint32_t saturatedAdd(const uint32_t lhs, const uint32_t rhs) {
+  return UINT32_MAX - lhs < rhs ? UINT32_MAX : lhs + rhs;
+}
+
+int signedUtcOffsetQuarterHours() {
+  return std::clamp(static_cast<int>(SETTINGS.clockUtcOffsetQ), 0, 104) - 48;
+}
+
+bool readLocalTime(int32_t& localDay, uint8_t& localHour, uint8_t& weekday) {
+  uint16_t year = 0;
+  uint8_t month = 0;
+  uint8_t day = 0;
+  uint8_t hour = 0;
+  uint8_t minute = 0;
+  if (!halClock.getUtcDateTime(year, month, day, hour, minute)) return false;
+  const int offsetMinutes = signedUtcOffsetQuarterHours() * 15;
+  const int localMinutes = static_cast<int>(hour) * 60 + minute + offsetMinutes;
+  localDay = companion::localDayNumber(year, month, day, hour, minute, signedUtcOffsetQuarterHours());
+  localHour = static_cast<uint8_t>(((localMinutes / 60) % 24 + 24) % 24);
+  weekday = static_cast<uint8_t>(((localDay + 4) % 7 + 7) % 7);  // 1970-01-01 was Thursday.
+  return true;
+}
+
+bool ensureStatsLoaded() {
+  if (statsLoaded) return true;
+  statsLoaded = true;
+  HalFile file;
+  if (!Storage.openFileForRead("JRNL", kStatsPath, file)) return true;
+  StatsFile loaded{};
+  if (file.read(&loaded, sizeof(loaded)) != sizeof(loaded) || loaded.magic != kStatsMagic || loaded.version != 1 ||
+      loaded.size != sizeof(StatsFile)) {
+    LOG_ERR("JRNL", "Ignoring invalid reading stats file");
+    return false;
+  }
+  statsFile = loaded;
+  return true;
+}
+
+bool saveStats() {
+  statsFile.size = static_cast<uint16_t>(sizeof(StatsFile));
+  HalFile file;
+  if (!Storage.openFileForWrite("JRNL", kStatsTmpPath, file)) return false;
+  if (file.write(&statsFile, sizeof(statsFile)) != sizeof(statsFile)) {
+    LOG_ERR("JRNL", "Could not write reading stats");
+    return false;
+  }
+  file.close();  // The temporary file must be closed before the atomic rename.
+  Storage.remove(kStatsPath);
+  if (!Storage.rename(kStatsTmpPath, kStatsPath)) {
+    LOG_ERR("JRNL", "Could not install reading stats");
+    return false;
+  }
+  return true;
+}
 
 uint32_t nowEpoch() {
   uint16_t year = 0;
@@ -123,17 +218,45 @@ int load(Entry* entries, const int capacity) {
   if (!Storage.openFileForRead("JRNL", kPath, file)) return 0;
   Header header{};
   if (file.read(&header, sizeof(header)) != sizeof(header) || header.magic != kMagic ||
-      header.entrySize != sizeof(Entry)) {
+      (header.entrySize != sizeof(Entry) && header.entrySize != sizeof(LegacyEntry))) {
     LOG_ERR("JRNL", "Ignoring invalid journal file");
     return 0;
   }
   const int count = std::min<int>(header.count, capacity);
-  const size_t bytes = static_cast<size_t>(count) * sizeof(Entry);
-  if (file.read(entries, bytes) != static_cast<int>(bytes)) {
-    LOG_ERR("JRNL", "Journal file is truncated");
-    return 0;
+  if (header.entrySize == sizeof(Entry)) {
+    const size_t bytes = static_cast<size_t>(count) * sizeof(Entry);
+    if (file.read(entries, bytes) != static_cast<int>(bytes)) {
+      LOG_ERR("JRNL", "Journal file is truncated");
+      return 0;
+    }
+  } else {
+    for (int i = 0; i < count; ++i) {
+      LegacyEntry old{};
+      if (file.read(&old, sizeof(old)) != sizeof(old)) {
+        LOG_ERR("JRNL", "Legacy journal file is truncated");
+        return 0;
+      }
+      copyText(entries[i].path, kPathBytes, old.path);
+      copyText(entries[i].title, kTitleBytes, old.title);
+      copyText(entries[i].author, kAuthorBytes, old.author);
+      entries[i].startedAt = old.startedAt;
+      entries[i].finishedAt = old.finishedAt;
+      entries[i].rating = old.rating;
+    }
   }
   return count;
+}
+
+bool loadStats(Stats& stats) {
+  ensureStatsLoaded();
+  stats = statsFile.stats;
+  int32_t todayDay = companion::DayLedger::NEVER;
+  uint8_t hour = 0;
+  uint8_t weekday = 0;
+  if (readLocalTime(todayDay, hour, weekday) && statsFile.lastReadDay != companion::DayLedger::NEVER &&
+      todayDay > statsFile.lastReadDay + 1)
+    stats.currentStreakDays = 0;
+  return true;
 }
 
 bool noteStarted(const char* path, const char* title, const char* author) {
@@ -145,6 +268,91 @@ bool noteFinished(const char* path) { return path && *path && update(path, nullp
 bool setRating(const char* path, uint8_t rating) {
   if (rating > 5) rating = 5;
   return path && *path && update(path, nullptr, nullptr, false, rating);
+}
+
+void beginReadingSession(const char* path) {
+  activeSession.accumulator.reset();
+  activeSession.path[0] = '\0';
+  activeSession.startedSeconds = 0;
+  activeSession.openingSeconds = 0;
+  activeSession.pageTurns = 0;
+  activeSession.localHour = 0;
+  activeSession.weekday = 0;
+  activeSession.localDay = companion::DayLedger::NEVER;
+  activeSession.active = false;
+  if (!path || !*path) return;
+  copyText(activeSession.path, kPathBytes, path);
+  activeSession.startedSeconds = millis() / 1000;
+  readLocalTime(activeSession.localDay, activeSession.localHour, activeSession.weekday);
+  activeSession.active = true;
+}
+
+void notePageTurn() {
+  if (!activeSession.active) return;
+  const uint32_t now = millis() / 1000;
+  if (activeSession.pageTurns == 0 && activeSession.accumulator.creditedSeconds() == 0) {
+    constexpr uint32_t OPENING_PAGE_CAP_SECONDS = 300;
+    const uint32_t opening = now - activeSession.startedSeconds;
+    activeSession.openingSeconds = std::min(opening, OPENING_PAGE_CAP_SECONDS);
+  }
+  activeSession.accumulator.onPageTurn(now);
+  activeSession.pageTurns = saturatedAdd(activeSession.pageTurns, 1);
+}
+
+void tickReadingSession() {
+  if (activeSession.active) activeSession.accumulator.onTick(millis() / 1000);
+}
+
+void endReadingSession() {
+  if (!activeSession.active) return;
+  activeSession.accumulator.onTick(millis() / 1000);
+  const uint32_t pages = activeSession.pageTurns;
+  const uint32_t seconds = saturatedAdd(activeSession.accumulator.creditedSeconds(), activeSession.openingSeconds);
+  activeSession.active = false;
+  if (pages == 0) return;
+
+  ensureStatsLoaded();
+  Stats& stats = statsFile.stats;
+  stats.totalSessions = saturatedAdd(stats.totalSessions, 1);
+  stats.totalPageTurns = saturatedAdd(stats.totalPageTurns, pages);
+  stats.totalReadingSeconds = saturatedAdd(stats.totalReadingSeconds, seconds);
+  if (activeSession.localDay != companion::DayLedger::NEVER) {
+    const uint8_t bucket = activeSession.localHour < 5    ? 3
+                           : activeSession.localHour < 12 ? 0
+                           : activeSession.localHour < 17 ? 1
+                           : activeSession.localHour < 22 ? 2
+                                                          : 3;
+    stats.timeOfDaySeconds[bucket] = saturatedAdd(stats.timeOfDaySeconds[bucket], seconds);
+    stats.dayOfWeekSeconds[activeSession.weekday] =
+        saturatedAdd(stats.dayOfWeekSeconds[activeSession.weekday], seconds);
+  }
+
+  if (activeSession.localDay != companion::DayLedger::NEVER && activeSession.localDay != statsFile.lastReadDay) {
+    stats.currentStreakDays =
+        activeSession.localDay == statsFile.lastReadDay + 1 && stats.currentStreakDays < UINT16_MAX
+            ? static_cast<uint16_t>(stats.currentStreakDays + 1)
+            : 1;
+    stats.bestStreakDays = std::max(stats.bestStreakDays, stats.currentStreakDays);
+    statsFile.lastReadDay = activeSession.localDay;
+  }
+
+  auto entries = makeUniqueNoThrow<Entry[]>(kMaxEntries);
+  if (!entries) {
+    LOG_ERR("JRNL", "OOM: per-book analytics");
+  } else {
+    const int count = load(entries.get(), kMaxEntries);
+    for (int i = 0; i < count; ++i) {
+      if (std::strncmp(entries[i].path, activeSession.path, kPathBytes) != 0) continue;
+      entries[i].readingSeconds = saturatedAdd(entries[i].readingSeconds, seconds);
+      entries[i].readingSessions = static_cast<uint16_t>(
+          std::min<uint32_t>(UINT16_MAX, static_cast<uint32_t>(entries[i].readingSessions) + 1));
+      entries[i].pageTurns = saturatedAdd(entries[i].pageTurns, pages);
+      entries[i].lastReadDate = today();
+      if (!save(entries.get(), count)) LOG_ERR("JRNL", "Could not save per-book analytics");
+      break;
+    }
+  }
+  if (!saveStats()) LOG_ERR("JRNL", "Could not save reading stats");
 }
 
 bool setDateField(const char* path, const uint32_t date, const bool finish) {

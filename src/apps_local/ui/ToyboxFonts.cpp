@@ -10,6 +10,7 @@
 #include "fonts/reading_serif_14.h"
 #include "fonts/reading_serif_bold_12.h"
 #include "fonts/reading_serif_bold_16.h"
+#include "fonts/terminal_mono_11.h"
 #include "fonts/toybox_10.h"
 #include "fonts/toybox_14.h"
 #include "fonts/toybox_20.h"
@@ -51,6 +52,7 @@ EpdFont readingBold16(&reading_serif_bold_16);
 EpdFont instrument10(&instrument_10);
 EpdFont instrument13(&instrument_13);
 EpdFont instrument24(&instrument_24);
+EpdFont terminalMono11(&terminal_mono_11);
 EpdFontFamily displayFamily(&display30);
 EpdFontFamily uiFamily(&ui20);
 EpdFontFamily tileFamily(&tile10);
@@ -62,6 +64,7 @@ EpdFontFamily readingBoldFamily(&readingBold16);
 EpdFontFamily serifTileFamily(&instrument13);
 EpdFontFamily serifSmallFamily(&instrument10);
 EpdFontFamily serifTitleFamily(&instrument24);
+EpdFontFamily terminalMonoFamily(&terminalMono11);
 
 bool registered = false;
 
@@ -121,6 +124,7 @@ void ensureFonts(GfxRenderer& renderer) {
   renderer.insertFont(kSerifTileFontId, serifTileFamily);
   renderer.insertFont(kSerifSmallFontId, serifSmallFamily);
   renderer.insertFont(kSerifTitleFontId, serifTitleFamily);
+  renderer.insertFont(kTerminalMonoFontId, terminalMonoFamily);
   registered = true;
 }
 

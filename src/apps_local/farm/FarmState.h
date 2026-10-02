@@ -14,6 +14,7 @@ constexpr int QUEST_COUNT = 6;
 
 enum class CropBranch : uint8_t { Default = 0, Scholar = 1, Wild = 2 };
 enum class CareAction : uint8_t { Water = 0, Shade = 1, Weed = 2, Fertilize = 3, Tend = 4 };
+enum class WeatherEffect : uint8_t { Clear = 0, Cloudy = 1, Rain = 2, Snow = 3 };
 
 struct QuestProgress {
   uint16_t progress;
@@ -53,10 +54,15 @@ class FarmState : public PersistableStore<FarmState> {
  public:
   static const char* getFilePath() { return "/.crosspoint/farm.json"; }
 
+  bool initializeFromFile();
+  bool saveToFile() const;
   void toJson(JsonDocument& doc) const;
   bool fromJson(JsonVariantConst doc);
 
   bool refreshForToday();
+  bool weatherCheckDue(int32_t utcMinute) const;
+  bool applyWeather(WeatherEffect effect, int32_t utcMinute);
+  WeatherEffect weatherEffect() const { return currentWeather; }
   bool buySeasonalSeedAndPlant();
   bool buySeedAndPlant(uint8_t cropId);
   bool buyNextPlot();
@@ -122,6 +128,9 @@ class FarmState : public PersistableStore<FarmState> {
   uint8_t questRewardClaims = 0;
   uint8_t careCredits = 0;
   int32_t questDay = 0;
+  int32_t lastWeatherMinute = 0;
+  WeatherEffect currentWeather = WeatherEffect::Clear;
+  bool persistenceReady = false;
 
   void advanceDays(int32_t days);
   void resetQuestsIfNeeded(int32_t localDay);

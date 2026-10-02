@@ -15,6 +15,7 @@ class ReaderActivity : public Activity {
   bool forcedRefreshPending = false;
   uint16_t farmSessionPages = 0;
   bool farmFinishRecorded = false;
+  bool journalSessionStarted = false;
 
   std::unique_ptr<EndOfBookOptions> endOfBookOptions;
   std::atomic<bool> endOfBookOptionsReady{false};

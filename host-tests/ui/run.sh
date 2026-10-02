@@ -56,6 +56,7 @@ mkdir -p "$BUILD_DIR"
   ../../src/apps_local/player/PlayerName.cpp \
   ../../src/apps_local/player/PlayerScreen.cpp \
   ../../src/apps_local/study/StudyScreens.cpp \
+  ../../src/apps_local/terminalhack/TerminalHackScreens.cpp \
   ../../src/apps_local/xkcd/XkcdScreens.cpp \
   test_ui.cpp -o "$BUILD_DIR/test_ui"
 "$BUILD_DIR/test_ui"

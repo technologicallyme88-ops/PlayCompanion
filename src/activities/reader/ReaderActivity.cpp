@@ -54,6 +54,7 @@ void ReaderActivity::disableFastInitialRefresh() { pagesUntilFullRefresh = 0; }
 
 void ReaderActivity::onEnter() {
   Activity::onEnter();
+  FARM_STATE.initializeFromFile();
 
   if (!Storage.exists(bookPath.c_str())) {
     LOG_ERR("READER", "File does not exist: %s", bookPath.c_str());
@@ -83,12 +84,18 @@ void ReaderActivity::onEnter() {
   if (!journal::noteStarted(bookPath.c_str(), getBookTitle().c_str(), getBookAuthor().c_str())) {
     LOG_ERR("READER", "Could not record journal start");
   }
+  journal::beginReadingSession(bookPath.c_str());
+  journalSessionStarted = true;
   requestUpdate();
 }
 
 void ReaderActivity::onExit() {
   Activity::onExit();
 
+  if (journalSessionStarted) {
+    journal::endReadingSession();
+    journalSessionStarted = false;
+  }
   COMPANION.endSession();
   FARM_STATE.finishReadingSession(farmSessionPages);
   if (!FARM_STATE.saveToFile()) LOG_ERR("FARM", "Failed to save reading rewards");
@@ -108,6 +115,7 @@ bool ReaderActivity::pageTurnTracked(const bool isForward) {
   const bool turned = pageTurn(isForward);
   if (turned) {
     COMPANION.onPageTurn();
+    journal::notePageTurn();
     FARM_STATE.onPageTurn();
     farmSessionPages++;
     if (isForward && isAtEndOfBook() && !farmFinishRecorded) {
@@ -124,6 +132,7 @@ bool ReaderActivity::skipPagesTracked(const int amount) {
   // counts as one navigation event rather than pretending ten pages were read.
   if (turned) {
     COMPANION.onPageTurn();
+    journal::notePageTurn();
     FARM_STATE.onPageTurn();
     farmSessionPages++;
   }
@@ -187,6 +196,7 @@ bool ReaderActivity::handleEndOfBookPageTurn(const bool prevTriggered, const boo
 }
 
 void ReaderActivity::loop() {
+  if (journalSessionStarted) journal::tickReadingSession();
   clearEndOfBookOptionsIfNeeded();
   if (handleEndOfBookMenu()) return;
   if (handleFormatInput()) return;
