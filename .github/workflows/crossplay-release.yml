@@ -95,7 +95,9 @@ jobs:
           }
           check 0     e903 "bootloader"
           check 32768 aa50 "partition table"
-          check 65536 e907 "app"
+          # ESP32-S3 application images use e908; e907 is the ESP32-C3 image
+          # magic used by the X3/X4 application-only builds.
+          check 65536 e908 "X4 Pro app"
           exit $fail
 
       - name: Publish
