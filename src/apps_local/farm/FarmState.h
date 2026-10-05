@@ -123,16 +123,18 @@ class FarmState : public PersistableStore<FarmState> {
   uint8_t tendsToday = 0;
   uint8_t watersToday = 0;
   uint8_t maxSessionPages = 0;
-  uint8_t nightPages = 0;
+  uint16_t nightPages = 0;
   uint8_t questClaims = 0;
   uint8_t questRewardClaims = 0;
   uint8_t careCredits = 0;
   int32_t questDay = 0;
+  int32_t lastVitalMinute = 0;
   int32_t lastWeatherMinute = 0;
   WeatherEffect currentWeather = WeatherEffect::Clear;
   bool persistenceReady = false;
 
   void advanceDays(int32_t days);
+  void advanceHours(int32_t hours);
   void resetQuestsIfNeeded(int32_t localDay);
   void updateBranch(Plot& plot);
   void discover(const Plot& plot);

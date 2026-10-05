@@ -10,7 +10,7 @@ import subprocess
 X4PRO_VERSION = "1.5.0-x4pro-playcompanion-r11"
 X4_VERSION = "1.5.0-x4-playcompanion-r11"
 X3_VERSION = "1.5.0-x3-playcompanion-r11"
-APP_PARTITION_BYTES = 0x640000
+APP_PARTITION_BYTES = 0x770000
 WARN_PERCENT = 92.0
 FAIL_PERCENT = 98.0
 
@@ -104,7 +104,7 @@ def package_firmware(source, target, env):
             f"Version: {manifest['version']}",
             f"Built (UTC): {now}",
             f"SHA-256: {digest}",
-            f"Image size: {size:,} bytes ({percent:.1f}% of 0x640000 app partition)",
+            f"Image size: {size:,} bytes ({percent:.1f}% of 0x{APP_PARTITION_BYTES:x} app partition)",
             f"Headroom: {headroom:,} bytes",
             f"Git: {manifest['git_branch']} {manifest['git_commit']}",
             "",

@@ -294,6 +294,9 @@ inline std::vector<SettingInfo> getSettingsList(const SdCardFontRegistry* regist
         buildCompanionCharacterSetting(),
         SettingInfo::Toggle(StrId::STR_FARMING_ENABLED, &CrossPointSettings::farmingEnabled, "farmingEnabled",
                             StrId::STR_CAT_DISPLAY),
+        SettingInfo::Enum(StrId::STR_INFO_DISPLAY, &CrossPointSettings::homeInfoDisplay,
+                          {StrId::STR_POKEMON_OFF, StrId::STR_COMPANION_ENABLED, StrId::STR_FARM}, "homeInfoDisplay",
+                          StrId::STR_CAT_DISPLAY),
 
         // --- Reader ---
         // Built-in font-family entry. Replaced per-call with a registry-aware

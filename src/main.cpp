@@ -487,12 +487,14 @@ void setup() {
   // The X4 Pro has no confirmed VBUS-detect GPIO, so a charge-only cable can
   // present as a plain power-on reset. The persisted explicit-off bit survives
   // that reset; a real button wake is ESP_RST_DEEPSLEEP and clears it here.
+#if !defined(SIMULATOR)
   if (wakeupReason == HalGPIO::WakeupReason::PowerButton && esp_reset_reason() == ESP_RST_DEEPSLEEP) {
     if (APP_STATE.poweredOff) {
       APP_STATE.poweredOff = false;
       APP_STATE.saveToFile();
     }
   }
+#endif
 
   switch (wakeupReason) {
     case HalGPIO::WakeupReason::PowerButton:

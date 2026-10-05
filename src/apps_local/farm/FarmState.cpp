@@ -22,8 +22,9 @@ constexpr std::array<CropDefinition, CROP_COUNT> CROPS = {{
     {3, 8, 40, 80, true},  // winter
 }};
 constexpr std::array<uint16_t, PLOT_COUNT - 1> PLOT_PRICES = {250, 600, 1200};
-constexpr std::array<uint16_t, QUEST_COUNT> QUEST_GOALS = {30, 5, 3, 15, 10, 3};
-constexpr std::array<uint16_t, QUEST_COUNT> QUEST_REWARDS = {1, 1, 1, 1, 1, 1};
+constexpr uint16_t STREAK_QUEST_GOAL = 3;
+constexpr std::array<uint16_t, QUEST_COUNT> QUEST_GOALS = {30, 5, 3, 15, 10, STREAK_QUEST_GOAL};
+constexpr std::array<uint16_t, QUEST_COUNT> QUEST_REWARDS = {1, 1, 1, 1, 1, 3};
 constexpr uint8_t MAX_VITAL = 100;
 constexpr uint8_t MAX_CARE_CREDITS = 5;
 constexpr int32_t WEATHER_REFRESH_MINUTES = 4 * 60;
@@ -41,6 +42,15 @@ int32_t signedUtcOffsetQuarterHours() {
   if (biased > 104) biased = 104;
   return static_cast<int32_t>(biased) - 48;
 }
+
+constexpr uint16_t streakQuestProgress(const uint16_t streak) {
+  return streak == 0 ? 0 : static_cast<uint16_t>((streak - 1) % STREAK_QUEST_GOAL + 1);
+}
+
+static_assert(streakQuestProgress(1) == 1);
+static_assert(streakQuestProgress(2) == 2);
+static_assert(streakQuestProgress(3) == 3);
+static_assert(streakQuestProgress(4) == 1);
 }  // namespace
 
 FarmState::FarmState() = default;
@@ -93,6 +103,7 @@ void FarmState::toJson(JsonDocument& doc) const {
   doc["questRewardClaims"] = questRewardClaims;
   doc["careCredits"] = careCredits;
   doc["questDay"] = questDay;
+  doc["lastVitalMinute"] = lastVitalMinute;
   doc["lastWeatherMinute"] = lastWeatherMinute;
   doc["weatherEffect"] = static_cast<uint8_t>(currentWeather);
   JsonArray plotArray = doc["plots"].to<JsonArray>();
@@ -143,11 +154,12 @@ bool FarmState::fromJson(const JsonVariantConst doc) {
   tendsToday = doc["tendsToday"] | static_cast<uint8_t>(0);
   watersToday = doc["watersToday"] | static_cast<uint8_t>(0);
   maxSessionPages = doc["maxSessionPages"] | static_cast<uint8_t>(0);
-  nightPages = doc["nightPages"] | static_cast<uint8_t>(0);
+  nightPages = doc["nightPages"] | static_cast<uint16_t>(0);
   questClaims = doc["questClaims"] | static_cast<uint8_t>(0);
   questRewardClaims = doc["questRewardClaims"] | static_cast<uint8_t>(0);
   careCredits = std::min<uint8_t>(MAX_CARE_CREDITS, doc["careCredits"] | static_cast<uint8_t>(0));
   questDay = doc["questDay"] | 0;
+  lastVitalMinute = doc["lastVitalMinute"] | 0;
   lastWeatherMinute = doc["lastWeatherMinute"] | 0;
   const uint8_t savedWeather = doc["weatherEffect"] | static_cast<uint8_t>(WeatherEffect::Clear);
   currentWeather = savedWeather <= static_cast<uint8_t>(WeatherEffect::Snow)
@@ -225,25 +237,36 @@ void FarmState::advanceDays(const int32_t days) {
       plot.withered = true;
       continue;
     }
-    uint8_t moistureDecay = static_cast<uint8_t>(std::min<int32_t>(100, days * 15));
-    uint8_t sunlightDecay = static_cast<uint8_t>(std::min<int32_t>(100, days * 8));
-    uint8_t nutrientDecay = static_cast<uint8_t>(std::min<int32_t>(100, days * 5));
-    if (ownsUpgrade(1)) moistureDecay /= 2;
-    if (ownsUpgrade(0)) sunlightDecay /= 2;
-    plot.moisture = clampSub(plot.moisture, moistureDecay);
-    plot.sunlight = clampSub(plot.sunlight, sunlightDecay);
-    plot.nutrients = clampSub(plot.nutrients, nutrientDecay);
-    if (ownsUpgrade(2))
-      plot.nutrients = clampAdd(plot.nutrients, static_cast<uint8_t>(std::min<int32_t>(100, days * 12)));
-    if (plot.moisture < 20 || plot.nutrients < 20) {
-      uint8_t healthDecay = static_cast<uint8_t>(std::min<int32_t>(100, days * 12));
-      if (ownsUpgrade(3)) healthDecay /= 2;
-      plot.health = clampSub(plot.health, healthDecay);
-    }
     const int32_t age = farmDay - plot.plantedFarmDay;
     plot.stage = static_cast<uint8_t>(std::min<int32_t>(4, 1 + age * 4 / definition.growDays));
     updateBranch(plot);
     discover(plot);
+  }
+}
+
+void FarmState::advanceHours(const int32_t hours) {
+  if (hours <= 0) return;
+  uint8_t moistureDecay = static_cast<uint8_t>(std::min<int32_t>(100, hours * 4));
+  uint8_t sunlightDecay = static_cast<uint8_t>(std::min<int32_t>(100, hours * 2));
+  const uint8_t nutrientDecay = static_cast<uint8_t>(std::min<int32_t>(100, hours));
+  if (ownsUpgrade(1)) moistureDecay /= 2;
+  if (ownsUpgrade(0)) sunlightDecay /= 2;
+
+  for (int i = 0; i < ownedPlotCount; ++i) {
+    Plot& plot = plots[i];
+    if (plot.cropId == 0 || plot.withered) continue;
+    plot.moisture = clampSub(plot.moisture, moistureDecay);
+    plot.sunlight = clampSub(plot.sunlight, sunlightDecay);
+    plot.nutrients = clampSub(plot.nutrients, nutrientDecay);
+    if (ownsUpgrade(2)) {
+      plot.nutrients = clampAdd(plot.nutrients, static_cast<uint8_t>(std::min<int32_t>(100, hours * 2)));
+    }
+    if (plot.moisture < 20 || plot.nutrients < 20) {
+      uint8_t healthDecay = static_cast<uint8_t>(std::min<int32_t>(100, hours * 2));
+      if (ownsUpgrade(3)) healthDecay /= 2;
+      plot.health = clampSub(plot.health, healthDecay);
+    }
+    updateBranch(plot);
   }
 }
 
@@ -257,15 +280,30 @@ bool FarmState::refreshForToday() {
   if (!halClock.getUtcDateTime(year, month, dayOfMonth, hour, minute)) return false;
   const int32_t localDay =
       companion::localDayNumber(year, month, dayOfMonth, hour, minute, signedUtcOffsetQuarterHours());
+  bool changed = false;
+  const int32_t previousQuestDay = questDay;
   resetQuestsIfNeeded(localDay);
+  changed = questDay != previousQuestDay;
   if (lastLocalDay == 0) {
     lastLocalDay = localDay;
+    changed = true;
+  } else if (localDay > lastLocalDay) {
+    advanceDays(localDay - lastLocalDay);
+    lastLocalDay = localDay;
+    changed = true;
+  }
+  const int32_t utcMinute = companion::localDayNumber(year, month, dayOfMonth, hour, minute, 0) * 1440 + hour * 60 + minute;
+  if (lastVitalMinute <= 0 || utcMinute < lastVitalMinute) {
+    lastVitalMinute = utcMinute;
     return true;
   }
-  if (localDay <= lastLocalDay) return false;
-  advanceDays(localDay - lastLocalDay);
-  lastLocalDay = localDay;
-  return true;
+  const int32_t elapsedHours = (utcMinute - lastVitalMinute) / 60;
+  if (elapsedHours > 0) {
+    advanceHours(elapsedHours);
+    lastVitalMinute += elapsedHours * 60;
+    changed = true;
+  }
+  return changed;
 }
 
 bool FarmState::weatherCheckDue(const int32_t utcMinute) const {
@@ -281,16 +319,16 @@ bool FarmState::applyWeather(const WeatherEffect effect, const int32_t utcMinute
     if (plot.cropId == 0 || plot.withered) continue;
     switch (effect) {
       case WeatherEffect::Rain:
-        plot.moisture = clampAdd(plot.moisture, 25);
+        plot.moisture = clampAdd(plot.moisture, 8);
         break;
       case WeatherEffect::Snow:
-        plot.moisture = clampAdd(plot.moisture, 10);
+        plot.moisture = clampAdd(plot.moisture, 4);
         break;
       case WeatherEffect::Clear:
-        plot.sunlight = clampAdd(plot.sunlight, 12);
+        plot.sunlight = clampAdd(plot.sunlight, 6);
         break;
       case WeatherEffect::Cloudy:
-        plot.sunlight = clampAdd(plot.sunlight, 4);
+        plot.sunlight = clampAdd(plot.sunlight, 2);
         break;
     }
   }
@@ -381,22 +419,22 @@ bool FarmState::careForPlot(const CareAction action, const uint8_t plotIndex) {
       if (!enhanced && waterStock == 0) return false;
       if (!enhanced) waterStock--;
       watersToday = std::min<uint8_t>(3, watersToday + 1);
-      target->moisture = clampAdd(target->moisture, enhanced ? 50 : 35);
+      target->moisture = clampAdd(target->moisture, enhanced ? 18 : 12);
       break;
     case CareAction::Shade:
-      target->sunlight = clampAdd(target->sunlight, enhanced ? 40 : (ownsUpgrade(4) ? 30 : 20));
+      target->sunlight = clampAdd(target->sunlight, enhanced ? 14 : (ownsUpgrade(4) ? 12 : 8));
       break;
     case CareAction::Weed:
-      target->health = clampAdd(target->health, enhanced ? 35 : 25);
+      target->health = clampAdd(target->health, enhanced ? 16 : 10);
       break;
     case CareAction::Fertilize:
       if (!enhanced && fertilizerStock == 0) return false;
       if (!enhanced) fertilizerStock--;
-      target->nutrients = clampAdd(target->nutrients, enhanced ? 50 : 35);
+      target->nutrients = clampAdd(target->nutrients, enhanced ? 16 : 10);
       break;
     case CareAction::Tend:
-      target->health = clampAdd(target->health, enhanced ? 15 : 10);
-      target->sunlight = clampAdd(target->sunlight, enhanced ? 10 : 5);
+      target->health = clampAdd(target->health, enhanced ? 7 : 4);
+      target->sunlight = clampAdd(target->sunlight, enhanced ? 4 : 2);
       tendsToday = std::min<uint8_t>(5, tendsToday + 1);
       break;
   }
@@ -443,11 +481,12 @@ void FarmState::onPageTurn() {
     resetQuestsIfNeeded(
         companion::localDayNumber(year, month, dayOfMonth, hour, minute, signedUtcOffsetQuarterHours()));
     const int localMinutes = static_cast<int>(hour) * 60 + minute + signedUtcOffsetQuarterHours() * 15;
-    const int localHour = ((localMinutes / 60) % 24 + 24) % 24;
+    const int normalizedLocalMinutes = ((localMinutes % 1440) + 1440) % 1440;
+    const int localHour = normalizedLocalMinutes / 60;
     nightReading = localHour >= 23 || localHour < 6;
   }
   pagesToday = std::min<uint16_t>(UINT16_MAX, pagesToday + 1);
-  if (nightReading) nightPages = std::min<uint8_t>(10, nightPages + 1);
+  if (nightReading) nightPages = static_cast<uint16_t>(std::min<uint32_t>(UINT16_MAX, nightPages + 1U));
   for (int i = 0; i < ownedPlotCount; ++i) {
     Plot& plot = plots[i];
     if (plot.cropId == 0 || plot.withered) continue;
@@ -491,10 +530,14 @@ void FarmState::resetQuestsIfNeeded(const int32_t localDay) {
 
 QuestProgress FarmState::quest(const uint8_t index) const {
   if (index >= QUEST_COUNT) return {};
-  const uint16_t displayedStreak =
-      pagesToday > 0 && currentStreak < UINT16_MAX ? static_cast<uint16_t>(currentStreak + 1) : currentStreak;
+  uint16_t streakProgress = static_cast<uint16_t>(currentStreak % STREAK_QUEST_GOAL);
+  if (pagesToday > 0) {
+    const uint16_t displayedStreak =
+        currentStreak < UINT16_MAX ? static_cast<uint16_t>(currentStreak + 1) : currentStreak;
+    streakProgress = streakQuestProgress(displayedStreak);
+  }
   const uint16_t values[QUEST_COUNT] = {pagesToday,      tendsToday, watersToday,
-                                        maxSessionPages, nightPages, displayedStreak};
+                                        maxSessionPages, nightPages, streakProgress};
   return {values[index], QUEST_GOALS[index], QUEST_REWARDS[index], (questClaims & (1U << index)) != 0,
           (questRewardClaims & (1U << index)) != 0};
 }
@@ -531,7 +574,8 @@ bool FarmState::claimQuest(const uint8_t index) {
   const uint8_t mask = static_cast<uint8_t>(1U << index);
   if ((questClaims & mask) == 0 || (questRewardClaims & mask) != 0) return false;
   questRewardClaims |= mask;
-  careCredits++;
+  careCredits = static_cast<uint8_t>(
+      std::min<uint16_t>(MAX_CARE_CREDITS, static_cast<uint16_t>(careCredits) + QUEST_REWARDS[index]));
   return true;
 }
 

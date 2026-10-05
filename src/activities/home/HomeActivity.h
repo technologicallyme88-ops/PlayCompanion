@@ -31,6 +31,8 @@ class HomeActivity final : public Activity {
   std::vector<RecentBook> recentBooks;
   OptionPopup bookOptionsPopup;
   Rect farmPlotRect;
+  uint8_t homeFarmPlotIndex = 0;
+  bool homeFarmPlotSelectionArmed = false;
   const HomeMenuItem initialMenuItem;
 
   // Convert HomeMenuItem to menu index (used in onEnter)
@@ -71,9 +73,17 @@ class HomeActivity final : public Activity {
   // Width the menu was last drawn at. The companion can sit in the space beside
   // a narrowed menu, so touch must not claim the full row width there.
   int companionMenuWidth = 0;
-  // Draws the companion and its speech bubble in the region the theme set aside
-  // for it. No-op unless enabled.
+  // Draws the companion in the region the theme set aside for it. The selected
+  // information mode independently decides whether its speech bubble is shown.
   void drawCompanion(Rect region) const;
+  // Draws the selected farm plot's stats and returns the remaining companion
+  // region. The fixed stack buffer keeps this Home render allocation-free.
+  Rect drawFarmInfo(Rect region) const;
+#if defined(CROSSINK_ENABLE_POKEMON) || defined(HOME_EXP_PREVIEW)
+  // Draws the selected Pokemon's current-level EXP progress and returns the
+  // remaining companion region.
+  Rect drawPokemonExp(Rect region) const;
+#endif
   // Side-by-side fallback for themes whose menu leaves too little height to
   // stack the status under the character.
   void drawCompanionCompact(int stripTop, int available, int leftEdge, int pageWidth, const char* label,

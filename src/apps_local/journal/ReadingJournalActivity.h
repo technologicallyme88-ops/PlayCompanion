@@ -54,6 +54,10 @@ class ReadingJournalActivity final : public Activity {
   int editDay = 1;
   Rect bookCardRect{};
   Rect viewTabRects[3] = {Rect{}, Rect{}, Rect{}};
+  static constexpr int kMaxVisibleListTiles = 9;
+  Rect listTileRects[kMaxVisibleListTiles];
+  int listTileEntries[kMaxVisibleListTiles] = {};
+  int listVisibleCount = 0;
   Rect calendarGridRect{};
   int calendarVisibleEntries[3] = {-1, -1, -1};
   int calendarVisibleCount = 0;

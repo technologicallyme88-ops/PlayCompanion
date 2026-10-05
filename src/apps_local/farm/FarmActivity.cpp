@@ -70,11 +70,13 @@ FarmActivity::FarmActivity(GfxRenderer& renderer, MappedInputManager& mappedInpu
 void FarmActivity::onEnter() {
   Activity::onEnter();
   FARM_STATE.initializeFromFile();
+  if (FARM_STATE.refreshForToday() && !FARM_STATE.saveToFile()) LOG_ERR("FARM", "Failed to save timed decay");
   // Keep the optional crop-art location available on fresh cards. The theme
   // still has a built-in four-stage renderer when no bitmap pack is installed.
   Storage.mkdir("/.crosspoint/harvest");
   Storage.mkdir("/.crosspoint/harvest/crops");
   refreshWeatherIfDue();
+  nextVitalRefreshMs_ = millis() + 60000;
   setScreen(Screen::Menu);
 }
 
@@ -238,6 +240,14 @@ bool FarmActivity::handleTap() {
 }
 
 void FarmActivity::loop() {
+  const uint32_t now = millis();
+  if (static_cast<int32_t>(now - nextVitalRefreshMs_) >= 0) {
+    nextVitalRefreshMs_ = now + 60000;
+    if (FARM_STATE.refreshForToday()) {
+      if (!FARM_STATE.saveToFile()) LOG_ERR("FARM", "Failed to save timed decay");
+      requestUpdate();
+    }
+  }
   if (mappedInput.wasReleased(MappedInputManager::Button::Back)) {
     goBack();
     return;
@@ -393,9 +403,18 @@ void FarmActivity::renderList() {
       case Screen::Quests: {
         const QuestProgress quest = FARM_STATE.quest(i);
         snprintf(label, sizeof(label), "%s", I18N.get(QUEST_NAMES[i]));
-        const char* status = quest.claimed    ? tr(STR_FARM_REWARD_CLAIMED)
-                             : quest.complete ? tr(STR_FARM_CLAIM_REWARD)
-                                              : I18N.get(QUEST_HELP[i]);
+        const char* status = I18N.get(QUEST_HELP[i]);
+        char rewardStatus[48];
+        if (quest.claimed) {
+          status = tr(STR_FARM_REWARD_CLAIMED);
+        } else if (quest.complete) {
+          if (quest.reward == 1) {
+            status = tr(STR_FARM_CLAIM_REWARD);
+          } else {
+            snprintf(rewardStatus, sizeof(rewardStatus), tr(STR_FARM_CLAIM_CREDITS), quest.reward);
+            status = rewardStatus;
+          }
+        }
         snprintf(detail, sizeof(detail), "%u / %u - %s", quest.progress, quest.goal, status);
         break;
       }

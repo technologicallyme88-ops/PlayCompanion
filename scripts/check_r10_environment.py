@@ -5,7 +5,7 @@ pioenv = env.subst("$PIOENV")
 flags = " ".join(str(x) for x in env.get("BUILD_FLAGS", []))
 project = Path(env.subst("$PROJECT_DIR"))
 partitions = (project / "partitions.csv").read_text(encoding="utf-8")
-if "app0" not in partitions or "0x640000" not in partitions:
+if "app0" not in partitions or "0x770000" not in partitions:
     raise RuntimeError("r10 safety check: expected OTA partition layout is missing")
 if pioenv.startswith("x4pro_r10"):
     board = env.subst("$BOARD")

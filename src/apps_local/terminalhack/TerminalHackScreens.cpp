@@ -84,7 +84,9 @@ void dumpCell(toybox::Screen& screen, const terminalhack::Game& game, int page, 
     for (int hack = 0; hack < terminalhack::kHackCount; ++hack) {
       if (hackSlot(game, hack) != slot) continue;
       static constexpr const char* kSequences[] = {"(<+>)", "{#|#}", "[!?!]", "<^&>"};
-      const char* sequence = kSequences[(static_cast<int>(game.seed >> (hack * 3)) + hack) % 4];
+      const uint32_t sequenceIndex =
+          ((game.seed >> (hack * 3)) + static_cast<uint32_t>(hack)) % 4U;
+      const char* sequence = kSequences[sequenceIndex];
       std::memcpy(text + bracketOffset, game.hackUsed[hack] ? "....." : sequence, 5);
       if (!game.hackUsed[hack]) {
         char prefix[kCharactersPerColumn + 1];

@@ -13,6 +13,9 @@
 #include "pokemon/PokemonCompanionDialogue.h"
 #include "pokemon/PokemonService.h"
 #endif
+#if defined(HOME_EXP_PREVIEW)
+#include <PokemonTypes.h>
+#endif
 #include <Utf8.h>
 #include <Xtc.h>
 #include <esp_random.h>
@@ -25,6 +28,7 @@
 #include "../../apps_local/Shelf.h"  // CrossPlay game/app shelf
 #include "../../apps_local/journal/ReadingJournal.h"
 #include "../../apps_local/journal/ReadingJournalActivity.h"
+#include "../../apps_local/journal/FinishedBookActions.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "MappedInputManager.h"
@@ -51,7 +55,7 @@ int lastHomeSelection = 0;
 int homeShelfFolderCount() { return std::min(1, shelf::folderCount()); }
 
 bool pokemonEncounterPendingNow() {
-#if defined(CROSSINK_ENABLE_POKEMON)
+#if defined(CROSSINK_ENABLE_POKEMON) || defined(HOME_EXP_PREVIEW)
   pokemon::PokemonDashboardSnapshot snapshot{};
   return pokemon::devicePokemonService().loadDashboardSnapshot(snapshot) == pokemon::ServiceStatus::Ok &&
          snapshot.pending.kind == pokemon::PendingEventKind::Encounter;
@@ -338,7 +342,8 @@ void HomeActivity::onExit() {
   // Consume the milestone once the user has actually been on the screen that
   // shows it. Clearing at render time instead would lose it to the very first
   // repaint, before it had been read.
-  if (SETTINGS.companionEnabled && COMPANION_STATE.milestonePending) {
+  if (SETTINGS.companionEnabled && SETTINGS.homeInfoDisplay == CrossPointSettings::HOME_INFO_COMPANION &&
+      COMPANION_STATE.milestonePending) {
     COMPANION_STATE.milestonePending = false;
     COMPANION_STATE.saveToFile();
   }
@@ -440,9 +445,9 @@ void HomeActivity::drawCompanion(const Rect region) const {
   // normal mood lines. The flag is cleared by the caller after the render so a
   // repaint mid-visit does not swallow it before it has been seen.
   const char* quote = nullptr;
-  if (COMPANION_STATE.milestonePending) {
+  if (SETTINGS.homeInfoDisplay == CrossPointSettings::HOME_INFO_COMPANION && COMPANION_STATE.milestonePending) {
     quote = companion::milestoneQuoteFor(id, companionQuoteIndex);
-  } else {
+  } else if (SETTINGS.homeInfoDisplay == CrossPointSettings::HOME_INFO_COMPANION) {
 #if defined(CROSSINK_ENABLE_POKEMON)
     /* Stage 3D.1 SPECIES QUOTE */
     if (pokemon::isPokemonCompanionSelected()) {
@@ -573,6 +578,115 @@ void HomeActivity::drawCompanion(const Rect region) const {
   }
   drawCompanionPager(renderer, Rect{bubbleX, bubbleY, bubbleW, bubbleH}, page.page, page.pages, BUBBLE_PAD);
 }
+
+Rect HomeActivity::drawFarmInfo(const Rect region) const {
+  if (region.width <= 0 || region.height <= 0) return region;
+
+  constexpr int GAP = 6;
+  constexpr int PAD_X = 6;
+  constexpr int PAD_Y = 16;
+  constexpr int MIN_PANEL_WIDTH = 120;
+  const bool horizontal = region.width >= region.height * 2 && region.width >= MIN_PANEL_WIDTH * 2;
+  Rect panel;
+  Rect remaining = region;
+  if (horizontal) {
+    const int panelWidth = std::min(190, region.width / 2);
+    panel = Rect{region.x + region.width - panelWidth, region.y, panelWidth, region.height};
+    remaining.width = std::max(0, region.width - panelWidth - GAP);
+  } else {
+    const int panelHeight = std::min(118, region.height / 2);
+    panel = Rect{region.x, region.y, region.width, panelHeight};
+    remaining.y += panelHeight + GAP;
+    remaining.height = std::max(0, region.height - panelHeight - GAP);
+  }
+
+  uint8_t plotIndex = std::min<uint8_t>(homeFarmPlotIndex, FARM_STATE.ownedPlots() - 1);
+  const auto& plots = FARM_STATE.getPlots();
+  const farm::Plot& plot = plots[plotIndex];
+  const bool empty = plot.cropId == 0;
+  const int lineHeight = renderer.getLineHeight(SMALL_FONT_ID);
+  int y = panel.y + PAD_Y;
+  char line[48];
+  snprintf(line, sizeof(line), "%s %u", tr(STR_FARM_PLOT), plotIndex + 1);
+  renderer.drawText(UI_10_FONT_ID, panel.x + PAD_X, y, line, true, EpdFontFamily::BOLD);
+  y += renderer.getLineHeight(UI_10_FONT_ID);
+
+  const auto drawStat = [&](const StrId id, const uint8_t value) {
+    snprintf(line, sizeof(line), empty ? "%s: -" : "%s: %u", I18N.get(id), value);
+    renderer.drawText(SMALL_FONT_ID, panel.x + PAD_X, y, line);
+    y += lineHeight;
+  };
+  drawStat(StrId::STR_FARM_MOISTURE, plot.moisture);
+  drawStat(StrId::STR_FARM_LIGHT, plot.sunlight);
+  drawStat(StrId::STR_FARM_HEALTH, plot.health);
+  drawStat(StrId::STR_FARM_NUTRIENTS, plot.nutrients);
+  return remaining;
+}
+
+#if defined(CROSSINK_ENABLE_POKEMON)
+#ifndef HOME_EXP_VARIANT
+#define HOME_EXP_VARIANT 1
+#endif
+
+Rect HomeActivity::drawPokemonExp(const Rect region) const {
+  if (region.width <= 0 || region.height <= 0) return region;
+#if defined(HOME_EXP_PREVIEW)
+  constexpr uint8_t PREVIEW_LEVEL = 33;
+  const uint32_t totalXp = pokemon::xpRequired(PREVIEW_LEVEL) + 57;
+#else
+  if (!pokemon::isPokemonCompanionSelected()) return region;
+  pokemon::PokemonDashboardSnapshot snapshot{};
+  if (pokemon::devicePokemonService().loadDashboardSnapshot(snapshot) != pokemon::ServiceStatus::Ok) return region;
+  const uint32_t totalXp = snapshot.leader.totalXp;
+#endif
+
+  const pokemon::LevelXpProgress progress = pokemon::levelXpProgress(totalXp);
+  constexpr int BLOCK_HEIGHT = 40;
+  constexpr int BAR_HEIGHT = HOME_EXP_VARIANT == 3 ? 10 : 8;
+  const int blockHeight = std::min(BLOCK_HEIGHT, region.height);
+  // Keep the EXP block in the gap between the farm statistics and companion.
+  // It remains an overlay, so it does not push the centered sprite/name block.
+  const int freeHeight = std::max(0, region.height - blockHeight);
+  const int blockY = region.y + freeHeight / 8;
+  const Rect block{region.x, blockY, region.width, blockHeight};
+
+  char progressText[32];
+  if (progress.required == 0 || progress.earned >= progress.required) {
+    snprintf(progressText, sizeof(progressText), "%s", tr(STR_POKEMON_LEVEL_UP));
+  } else {
+    snprintf(progressText, sizeof(progressText), "%s %lu/%lu", tr(STR_POKEMON_EXP_SHORT),
+             static_cast<unsigned long>(progress.earned), static_cast<unsigned long>(progress.required));
+  }
+
+  const int labelWidth = renderer.getTextWidth(UI_10_FONT_ID, progressText, EpdFontFamily::BOLD);
+#if HOME_EXP_VARIANT == 1
+  const int labelX = block.x + (block.width - labelWidth) / 2;
+  const int barWidth = std::max(0, block.width * 3 / 4);
+  const int barX = block.x + (block.width - barWidth) / 2;
+#elif HOME_EXP_VARIANT == 2
+  constexpr int SIDE_INSET = 8;
+  const int labelX = block.x + SIDE_INSET;
+  const int barX = block.x + SIDE_INSET;
+  const int barWidth = std::max(0, block.width - SIDE_INSET * 2);
+#else
+  const int labelX = block.x + (block.width - labelWidth) / 2;
+  const int barX = block.x + block.width / 8;
+  const int barWidth = std::max(0, block.width * 3 / 4);
+#endif
+  renderer.drawText(UI_10_FONT_ID, labelX, block.y, progressText, true, EpdFontFamily::BOLD);
+  const int barY = block.y + renderer.getLineHeight(UI_10_FONT_ID) + 2;
+  if (barWidth > 0 && barY + BAR_HEIGHT <= block.y + block.height) {
+    renderer.drawRect(barX, barY, barWidth, BAR_HEIGHT);
+    const uint32_t required = progress.required == 0 ? 1 : progress.required;
+    const uint32_t earned = progress.required == 0 ? 1 : std::min(progress.earned, progress.required);
+    const int innerWidth = std::max(0, barWidth - 4);
+    const int fillWidth = static_cast<int>((static_cast<uint64_t>(innerWidth) * earned) / required);
+    if (fillWidth > 0) renderer.fillRect(barX + 2, barY + 2, fillWidth, std::max(1, BAR_HEIGHT - 4));
+  }
+
+  return region;
+}
+#endif
 
 void HomeActivity::drawCompanionCompact(const int stripTop, const int available, const int leftEdge,
                                         const int pageWidth, const char* label, const char* sub,
@@ -842,12 +956,22 @@ void HomeActivity::loop() {
 #if FREEINK_DEVICE_X4PRO
   int farmX = 0;
   int farmY = 0;
-  if (farmPlotRect.width > 0 && mappedInput.wasScreenTapped(farmX, farmY) && farmX >= farmPlotRect.x &&
-      farmX < farmPlotRect.x + farmPlotRect.width && farmY >= farmPlotRect.y &&
-      farmY < farmPlotRect.y + farmPlotRect.height) {
-    showFarmMenu();
-    requestUpdate();
-    return;
+  if (farmPlotRect.width > 0 && mappedInput.wasScreenTapped(farmX, farmY)) {
+    const int tappedPlot = GUI.getHomeFarmPlotIndex(farmPlotRect, farmX, farmY);
+    if (tappedPlot >= 0) {
+      if (tappedPlot < FARM_STATE.ownedPlots()) {
+        if (!homeFarmPlotSelectionArmed || homeFarmPlotIndex != tappedPlot) {
+          homeFarmPlotIndex = static_cast<uint8_t>(tappedPlot);
+          homeFarmPlotSelectionArmed = true;
+          requestUpdate();
+        } else {
+          showFarmMenu();
+        }
+      }
+      // Locked plots still own their touch area. Consuming the tap here keeps
+      // it from falling through to the recent-book cover underneath.
+      return;
+    }
   }
 #endif
 #if FREEINK_DEVICE_X4PRO
@@ -874,9 +998,18 @@ void HomeActivity::loop() {
             LOG_ERR("HOME", "OOM: ReadingJournalActivity");
         } else if (option == 2) {
           if (journal::noteFinished(path.c_str())) {
-            auto journalActivity = makeUniqueNoThrow<ReadingJournalActivity>(renderer, mappedInput, path);
+            if (SETTINGS.removeReadBooksFromRecents) RECENT_BOOKS.removeByPath(path);
+            std::string journalPath = path;
+            if (SETTINGS.moveFinishedToReadFolder && !journal::isInReadFolder(path)) {
+              journalPath = journal::moveFinishedBookToReadFolder(path, journal::epubCachePath(path));
+            }
+            auto journalActivity = makeUniqueNoThrow<ReadingJournalActivity>(renderer, mappedInput, journalPath);
             if (journalActivity)
-              startActivityForResult(std::move(journalActivity), [](const ActivityResult&) {});
+              startActivityForResult(std::move(journalActivity), [this, coverColumnCount](const ActivityResult&) {
+                loadRecentBooks(coverColumnCount);
+                selectorIndex = 0;
+                requestUpdate(true);
+              });
             else
               LOG_ERR("HOME", "OOM: ReadingJournalActivity");
           }
@@ -1086,7 +1219,7 @@ void HomeActivity::render(RenderLock&&) {
   coverRectW = drawnCover.width;
   GUI.drawRecentBookCover(renderer, drawnCover, recentBooks, selectorIndex, coverRendered, coverBufferStored,
                           bufferRestored, std::bind(&HomeActivity::storeCoverBuffer, this));
-  GUI.drawHomeFarmPlot(renderer, farmPlotRect, farmFocusable && selectorIndex == farmSelectorIndex);
+  GUI.drawHomeFarmPlot(renderer, farmPlotRect, homeFarmPlotSelectionArmed ? homeFarmPlotIndex : -1);
 
   const int renderedSelection =
       farmFocusable && selectorIndex == farmSelectorIndex
@@ -1112,6 +1245,7 @@ void HomeActivity::render(RenderLock&&) {
   }
 
 #if defined(CROSSINK_ENABLE_POKEMON) || defined(CROSSINK_SIM_POKEMON_HOME_TILE)
+  Rect pokemonRect{};
   // Pokémon occupies the lower-right column beside the final shelf row. The
   // companion is lifted slightly so its art and dialogue remain clear.
   if (!buttonPokemonMenu && homeShelfFolderCount() > 0 && companion.region.width > 0) {
@@ -1123,8 +1257,8 @@ void HomeActivity::render(RenderLock&&) {
     // and label sit comfortably inside the display.
     const int pokemonX = std::max(0, companionMenuWidth - metrics.contentSidePadding - 8);
     const int pokemonRight = pageWidth;
-    Rect pokemonRect{pokemonX, menuRect.y + pokemonRenderedRow * rowStep, std::max(0, pokemonRight - pokemonX),
-                     GUI.getMenuRowHeight(renderer)};
+    pokemonRect = Rect{pokemonX, menuRect.y + pokemonRenderedRow * rowStep, std::max(0, pokemonRight - pokemonX),
+                       GUI.getMenuRowHeight(renderer)};
     const int pokemonMenuIndex = upstreamMenuRows() + homeShelfFolderCount() + 1;
     const int pokemonSelectorIndex = static_cast<int>(recentBooks.size()) + farmOffset + pokemonMenuIndex;
     GUI.drawButtonMenu(
@@ -1141,6 +1275,26 @@ void HomeActivity::render(RenderLock&&) {
     constexpr int lift = 44;
     companionRegion.y = std::max(metrics.topPadding, companionRegion.y - lift);
   }
+  if (SETTINGS.farmingEnabled && SETTINGS.homeInfoDisplay == CrossPointSettings::HOME_INFO_FARM) {
+    const int regionBottom = companionRegion.y + companionRegion.height;
+    const int infoTop = farmPlotRect.y + farmPlotRect.height + 20;
+    if (companionRegion.y < infoTop) {
+      companionRegion.y = infoTop;
+      companionRegion.height = std::max(0, regionBottom - infoTop);
+    }
+    companionRegion = drawFarmInfo(companionRegion);
+  }
+#if defined(CROSSINK_ENABLE_POKEMON) || defined(CROSSINK_SIM_POKEMON_HOME_TILE)
+  if (pokemonRect.width > 0) {
+    companionRegion.x = pokemonRect.x;
+    companionRegion.width = pokemonRect.width;
+  }
+#endif
+#if defined(CROSSINK_ENABLE_POKEMON) || defined(HOME_EXP_PREVIEW)
+  if (SETTINGS.farmingEnabled && SETTINGS.homeInfoDisplay == CrossPointSettings::HOME_INFO_FARM) {
+    companionRegion = drawPokemonExp(companionRegion);
+  }
+#endif
   drawCompanion(companionRegion);
 
   const auto labels = mappedInput.mapLabels(recentBooks.empty() ? "" : tr(STR_RESUME), tr(STR_SELECT), tr(STR_DIR_UP),

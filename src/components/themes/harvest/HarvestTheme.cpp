@@ -160,7 +160,7 @@ void HarvestTheme::drawRecentBookCover(GfxRenderer& renderer, const Rect rect,
 }
 
 Rect HarvestTheme::getHomeFarmPlotRect(const Rect coverRect) const {
-  if (!SETTINGS.farmingEnabled) return {};
+  if (!SETTINGS.farmingEnabled) return Rect{};
   // Lyra's cover occupies the left 170-ish pixels. Start the farm immediately
   // after it so this panel replaces Lyra's title/author block rather than
   // drawing on top of it.
@@ -169,7 +169,16 @@ Rect HarvestTheme::getHomeFarmPlotRect(const Rect coverRect) const {
               coverRect.height - 24};
 }
 
-void HarvestTheme::drawHomeFarmPlot(const GfxRenderer& renderer, const Rect rect, const bool selected) const {
+int HarvestTheme::getHomeFarmPlotIndex(const Rect rect, const int x, const int y) const {
+  if (!SETTINGS.farmingEnabled || rect.width <= 0 || rect.height <= 0) return -1;
+  const int cell = std::max(1, std::min((rect.width - 12) / kColumns, (rect.height - 12) / kRows));
+  const int left = rect.x + (rect.width - cell * kColumns) / 2;
+  const int top = rect.y + (rect.height - cell * kRows) / 2;
+  if (x < left || x >= left + cell * kColumns || y < top || y >= top + cell * kRows) return -1;
+  return ((y - top) / cell) * kColumns + (x - left) / cell;
+}
+
+void HarvestTheme::drawHomeFarmPlot(const GfxRenderer& renderer, const Rect rect, const int selectedPlot) const {
   if (!SETTINGS.farmingEnabled || rect.width <= 0 || rect.height <= 0) return;
   renderer.fillRect(rect.x, rect.y, rect.width, rect.height, false);
   const int cell = std::max(1, std::min((rect.width - 12) / kColumns, (rect.height - 12) / kRows));
@@ -232,15 +241,9 @@ void HarvestTheme::drawHomeFarmPlot(const GfxRenderer& renderer, const Rect rect
     }
   }
 
-  if (selected) {
-    const int bubbleX = rect.x - kCoverSelectionPadding;
-    const int bubbleY = rect.y - kCoverSelectionPadding;
-    const int bubbleWidth = rect.width + kCoverSelectionPadding * 2;
-    renderer.fillRoundedRect(bubbleX, bubbleY, bubbleWidth, kCoverSelectionPadding, kCoverSelectionRadius, true, true,
-                             false, false, Color::LightGray);
-    renderer.fillRectDither(bubbleX, rect.y, kCoverSelectionPadding, rect.height, Color::LightGray);
-    renderer.fillRectDither(rect.x + rect.width, rect.y, kCoverSelectionPadding, rect.height, Color::LightGray);
-    renderer.fillRoundedRect(bubbleX, rect.y + rect.height, bubbleWidth, kCoverSelectionPadding, kCoverSelectionRadius,
-                             false, false, true, true, Color::LightGray);
+  if (selectedPlot >= 0 && selectedPlot < kRows * kColumns) {
+    const int selectedX = left + (selectedPlot % kColumns) * cell;
+    const int selectedY = top + (selectedPlot / kColumns) * cell;
+    renderer.drawRect(selectedX + 2, selectedY + 2, cell - 4, cell - 4, 2, true);
   }
 }

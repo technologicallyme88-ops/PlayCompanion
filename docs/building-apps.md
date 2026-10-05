@@ -373,16 +373,14 @@ the page colour, then stroke.
 
 **Flash is not as tight as one build log implies.** `pio` reports the app
 partition, not the chip. `partitions.csv` splits the X4 Pro's 16MB into two
-6.25MB app slots (`app0` running, `app1` the OTA landing pad), 3.38MB of
-SPIFFS, and small nvs/otadata/coredump areas -- all 16MB allocated. At 5.78MB
-used that is 88% of a slot but only 36% of the chip, and quoting the 88% as if
-it were the whole picture reads as alarm where there is none.
+7.44MB app slots (`app0` running, `app1` the OTA landing pad), 1MB of reserved
+SPIFFS space, and small nvs/otadata/coredump areas -- all 16MB allocated. The
+firmware does not mount SPIFFS: books, fonts and packs live on the SD card.
 
-Real headroom: **758KB free in the app slot today**, plus roughly 3MB
-reclaimable from SPIFFS, which this firmware appears not to use at all (books,
-fonts and packs all live on the SD card). Repartitioning needs a serial reflash
-rather than an OTA, so it is free to do before a device ships and expensive
-after.
+The r11.5 image measured 6,277,422 bytes before this repartition, leaving only
+276,178 bytes in the old app slot. The larger slots leave 1,521,362 bytes for
+the same image. Repartitioning needs a serial reflash rather than an OTA because
+the installed bootloader still reads the old partition table.
 
 **There are exactly two greys**: `LightGray` (25%) and `DarkGray` (50%). The
 source still says `TODO: maybe find a better pattern?`. Extending that set is

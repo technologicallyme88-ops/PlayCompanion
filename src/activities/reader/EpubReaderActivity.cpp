@@ -44,6 +44,7 @@
 #endif
 #include "apps_local/journal/ReadingJournal.h"
 #include "apps_local/journal/ReadingJournalActivity.h"
+#include "apps_local/journal/FinishedBookActions.h"
 #include "fontIds.h"
 #include "util/BookmarkUtil.h"
 #include "util/ScreenshotUtil.h"
@@ -63,8 +64,6 @@ int clampPercent(int percent) {
   return percent;
 }
 
-constexpr char READ_FOLDER[] = "/read";
-
 #if defined(CROSSINK_ENABLE_POKEMON)
 uint8_t pokemonBookProgressPercent(const std::shared_ptr<Epub>& epub, const int spineIndex, const Section* section) {
   if (!epub || epub->getBookSize() == 0) return 0;
@@ -79,11 +78,6 @@ uint8_t pokemonBookProgressPercent(const std::shared_ptr<Epub>& epub, const int 
   return static_cast<uint8_t>(clampPercent(static_cast<int>(progress * 100.0f + 0.5f)));
 }
 #endif
-
-bool isInReadFolder(const std::string& path) {
-  constexpr size_t n = sizeof(READ_FOLDER) - 1;
-  return path.size() > n && path.compare(0, n, READ_FOLDER) == 0 && path[n] == '/';
-}
 
 struct ProgressRange {
   float start;
@@ -113,52 +107,6 @@ bool bookmarkMatchesProgress(const BookmarkEntry& bookmark, const int spineIndex
   const float bookmarkProgress = std::clamp(bookmark.percentage, 0.0f, 1.0f);
   return bookmarkProgress + bookmarkProgressEpsilon >= pageRange.start &&
          bookmarkProgress - bookmarkProgressEpsilon <= pageRange.end;
-}
-
-std::string buildReadFolderDestination(const std::string& srcPath) {
-  const size_t lastSlash = srcPath.rfind('/');
-  const std::string filename = (lastSlash != std::string::npos) ? srcPath.substr(lastSlash + 1) : srcPath;
-
-  Storage.mkdir(READ_FOLDER);
-  std::string dstPath = std::string(READ_FOLDER) + "/" + filename;
-  if (!Storage.exists(dstPath.c_str())) {
-    return dstPath;
-  }
-
-  const size_t dotPos = filename.rfind('.');
-  const std::string base = (dotPos != std::string::npos) ? filename.substr(0, dotPos) : filename;
-  const std::string ext = (dotPos != std::string::npos) ? filename.substr(dotPos) : "";
-  int suffix = 2;
-  do {
-    dstPath = std::string(READ_FOLDER) + "/" + base + " (" + std::to_string(suffix) + ")" + ext;
-    suffix++;
-  } while (Storage.exists(dstPath.c_str()) && suffix < 100);
-  return dstPath;
-}
-
-void moveFinishedBookToReadFolder(const std::string& srcPath, const std::string& dstPath,
-                                  const std::string& oldCachePath) {
-  LOG_INF("ERS", "Moving finished epub: %s -> %s", srcPath.c_str(), dstPath.c_str());
-  if (!Storage.rename(srcPath.c_str(), dstPath.c_str())) {
-    LOG_ERR("ERS", "Failed to move finished book to '/Read' folder");
-    return;
-  }
-
-  const std::string newCachePath = "/.crosspoint/epub_" + std::to_string(std::hash<std::string>{}(dstPath));
-  if (!oldCachePath.empty() && Storage.exists(oldCachePath.c_str())) {
-    if (!Storage.rename(oldCachePath.c_str(), newCachePath.c_str())) {
-      LOG_ERR("ERS", "Failed to rename cache dir %s -> %s (non-fatal)", oldCachePath.c_str(), newCachePath.c_str());
-    }
-  }
-
-  RECENT_BOOKS.updatePath(srcPath, dstPath, oldCachePath, newCachePath);
-  if (!journal::updatePath(srcPath.c_str(), dstPath.c_str())) {
-    LOG_ERR("ERS", "Failed to update finished book's journal path");
-  }
-  if (APP_STATE.openEpubPath == srcPath) {
-    APP_STATE.openEpubPath = dstPath;
-    APP_STATE.saveToFile();
-  }
 }
 
 }  // namespace
@@ -243,9 +191,8 @@ EpubReaderActivity::~EpubReaderActivity() {
   if (pendingReadFolderMove && epub) {
     const std::string srcPath = epub->getPath();
     const std::string oldCachePath = epub->getCachePath();
-    const std::string dstPath = buildReadFolderDestination(srcPath);
     epub.reset();
-    moveFinishedBookToReadFolder(srcPath, dstPath, oldCachePath);
+    journal::moveFinishedBookToReadFolder(srcPath, oldCachePath);
   } else {
     epub.reset();
   }
@@ -481,7 +428,7 @@ void EpubReaderActivity::loop() {
   }
 
   if (atEndOfBook) {
-    pendingReadFolderMove = SETTINGS.moveFinishedToReadFolder && !isInReadFolder(epub->getPath());
+    pendingReadFolderMove = SETTINGS.moveFinishedToReadFolder && !journal::isInReadFolder(epub->getPath());
   } else {
     pendingReadFolderMove = false;
   }
@@ -913,9 +860,18 @@ void EpubReaderActivity::onReaderMenuConfirm(EpubReaderMenuActivity::MenuAction 
         if (!journalFinishRecorded) LOG_ERR("ERS", "Could not record journal finish");
       }
       if (journalFinishRecorded && epub) {
+        if (SETTINGS.removeReadBooksFromRecents) {
+          recentsEntryRemoved = RECENT_BOOKS.removeByPath(epub->getPath()) || recentsEntryRemoved;
+        }
+        pendingReadFolderMove = SETTINGS.moveFinishedToReadFolder && !journal::isInReadFolder(epub->getPath());
         auto journalActivity = makeUniqueNoThrow<ReadingJournalActivity>(renderer, mappedInput, epub->getPath());
         if (journalActivity)
-          startActivityForResult(std::move(journalActivity), [this](const ActivityResult&) { openReaderMenu(); });
+          startActivityForResult(std::move(journalActivity), [this](const ActivityResult&) {
+            if (pendingReadFolderMove)
+              activityManager.goHome();
+            else
+              openReaderMenu();
+          });
         else {
           LOG_ERR("ERS", "OOM: ReadingJournalActivity");
           openReaderMenu();

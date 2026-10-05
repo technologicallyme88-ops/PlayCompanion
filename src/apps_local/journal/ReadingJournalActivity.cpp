@@ -45,6 +45,17 @@ void formatReadingTime(const uint32_t seconds, char* out, const size_t cap) {
     std::snprintf(out, cap, "%lu min", static_cast<unsigned long>(minutes));
 }
 
+void formatWorkReadingPay(const uint32_t seconds, char* out, const size_t cap) {
+  // $44.9995/hour, stored in ten-thousandths of a dollar. Convert directly
+  // from seconds to rounded cents without floating-point drift.
+  constexpr uint64_t RATE_TEN_THOUSANDTHS = 449995;
+  constexpr uint64_t CENTS_DENOMINATOR = 3600 * 100;
+  const uint64_t cents =
+      (static_cast<uint64_t>(seconds) * RATE_TEN_THOUSANDTHS + CENTS_DENOMINATOR / 2) / CENTS_DENOMINATOR;
+  std::snprintf(out, cap, "$%llu.%02llu", static_cast<unsigned long long>(cents / 100),
+                static_cast<unsigned long long>(cents % 100));
+}
+
 void drawStar(const GfxRenderer& renderer, const int cx, const int cy, const int radius, const bool filled) {
   static constexpr int8_t px[10] = {0, 22, 95, 36, 59, 0, -59, -36, -95, -22};
   static constexpr int8_t py[10] = {-100, -31, -31, 12, 81, 38, 81, 12, -31, -31};
@@ -96,11 +107,14 @@ void ReadingJournalActivity::onEnter() {
       entries[i].readingSeconds = static_cast<uint32_t>((i + 2) * 47 * 60);
       entries[i].readingSessions = static_cast<uint16_t>(i + 2);
       entries[i].pageTurns = static_cast<uint32_t>((i + 2) * 61);
+      entries[i].lastReadDate = journal::today();
+      entries[i].readingDays = static_cast<uint16_t>(i + 2);
     }
     count = 3;
     stats.totalReadingSeconds = 63 * 3600 + 5 * 60;
     stats.totalPageTurns = 4919;
     stats.totalSessions = 324;
+    stats.workReadingSeconds = 17 * 3600 + 20 * 60;
     stats.currentStreakDays = 39;
     stats.bestStreakDays = 39;
     const uint32_t timeDemo[4] = {8 * 3600, 5 * 3600, 9 * 3600, 18 * 3600};
@@ -289,7 +303,8 @@ void ReadingJournalActivity::loop() {
       } else if (tapX >= calendarGridRect.x && tapX < calendarGridRect.x + calendarGridRect.width &&
                  tapY >= calendarGridRect.y && tapY < calendarGridRect.y + calendarGridRect.height) {
         const int cellW = calendarGridRect.width / 7;
-        const int cellH = calendarGridRect.height / 6;
+        const int calendarRows = (journal::weekday(year, month, 1) + journal::daysInMonth(year, month) + 6) / 7;
+        const int cellH = calendarGridRect.height / calendarRows;
         const int slot = ((tapY - calendarGridRect.y) / cellH) * 7 + (tapX - calendarGridRect.x) / cellW;
         const int day = slot - journal::weekday(year, month, 1) + 1;
         if (day >= 1 && day <= journal::daysInMonth(year, month)) {
@@ -340,7 +355,19 @@ void ReadingJournalActivity::loop() {
   } else if (view == View::List) {
     int tapX = 0;
     int tapY = 0;
-    if (mappedInput.wasScreenTapped(tapX, tapY) && handleViewTabTap(tapX, tapY)) return;
+    if (mappedInput.wasScreenTapped(tapX, tapY)) {
+      if (handleViewTabTap(tapX, tapY)) return;
+      for (int i = 0; i < listVisibleCount; ++i) {
+        const Rect& rect = listTileRects[i];
+        if (tapX >= rect.x && tapX < rect.x + rect.width && tapY >= rect.y && tapY < rect.y + rect.height) {
+          selected = listTileEntries[i];
+          summaryField = 0;
+          view = View::Summary;
+          requestUpdate();
+          return;
+        }
+      }
+    }
     const auto swipe = mappedInput.wasSwipe();
     if (swipe == MappedInputManager::SwipeDir::Up || mappedInput.wasReleased(MappedInputManager::Button::Down)) {
       listOffset = std::min(std::max(0, count - 1), listOffset + 1);
@@ -475,6 +502,7 @@ void ReadingJournalActivity::drawCalendar() {
   }
   const int first = journal::weekday(year, month, 1);
   const int days = journal::daysInMonth(year, month);
+  const int calendarRows = (first + days + 6) / 7;
   for (int day = 1; day <= days; ++day) {
     const int slot = first + day - 1;
     const int col = slot % 7;
@@ -495,10 +523,10 @@ void ReadingJournalActivity::drawCalendar() {
     if (start) renderer.drawRoundedRect(x + cellW / 2 - (finish ? 12 : 4), y + 31, 8, 8, 2, 4, true);
     if (finish) renderer.fillRoundedRect(x + cellW / 2 + (start ? 4 : -4), y + 31, 8, 8, 4, Black);
   }
-  calendarGridRect = Rect{side, top + 32, cellW * 7, cellH * 6};
-  const int tabsY = top + 32 + 6 * cellH + 4;
+  calendarGridRect = Rect{side, top + 32, cellW * 7, cellH * calendarRows};
+  const int tabsY = top + 32 + calendarRows * cellH + 4;
   drawViewTabs(tabsY);
-  const int cardY = tabsY + 50;
+  const int cardY = tabsY + 58;
   calendarVisibleCount = 0;
   std::fill(std::begin(calendarVisibleEntries), std::end(calendarVisibleEntries), -1);
   if (calendarSelectedDate != 0) {
@@ -540,6 +568,7 @@ void ReadingJournalActivity::drawList() {
   const int tabsY = metrics.topPadding + metrics.headerHeight + 10;
   drawViewTabs(tabsY);
   int y = tabsY + 55;
+  listVisibleCount = 0;
   int priorYear = -1;
   int priorMonth = -1;
   for (int position = listOffset; position < count; ++position) {
@@ -563,6 +592,11 @@ void ReadingJournalActivity::drawList() {
     constexpr int TILE_H = 68;
     if (y + TILE_H > sh - metrics.buttonHintsHeight) break;
     renderer.drawRoundedRect(side, y, sw - side * 2, TILE_H - 8, 8, 1, true);
+    if (listVisibleCount < kMaxVisibleListTiles) {
+      listTileRects[listVisibleCount] = Rect{side, y, sw - side * 2, TILE_H - 8};
+      listTileEntries[listVisibleCount] = index;
+      ++listVisibleCount;
+    }
     UITheme::drawCenteredWrappedText(renderer, Rect{side + 12, y + 6, sw - side * 2 - 24, 24}, UI_10_FONT_ID,
                                      entry.title[0] ? entry.title : entry.path, 1, true, EpdFontFamily::BOLD);
     renderer.drawText(UI_10_FONT_ID, side + 12, y + 34, entry.finishedAt ? "FINISHED" : "READING");
@@ -587,55 +621,59 @@ void ReadingJournalActivity::drawStats() {
   for (int i = 0; i < count; ++i)
     if (entries[i].finishedAt != 0) booksRead++;
   char readingTime[24];
-  char average[24];
+  char workReading[24];
   formatReadingTime(stats.totalReadingSeconds, readingTime, sizeof(readingTime));
-  formatReadingTime(stats.totalSessions ? stats.totalReadingSeconds / stats.totalSessions : 0, average, sizeof(average));
-  const uint32_t paceTenths = stats.totalReadingSeconds
-                                  ? static_cast<uint32_t>((static_cast<uint64_t>(stats.totalPageTurns) * 600) /
-                                                          stats.totalReadingSeconds)
-                                  : 0;
+  formatWorkReadingPay(stats.workReadingSeconds, workReading, sizeof(workReading));
   char values[6][24];
   std::snprintf(values[0], sizeof(values[0]), "%lu", static_cast<unsigned long>(stats.totalSessions));
   std::snprintf(values[1], sizeof(values[1]), "%s", readingTime);
-  std::snprintf(values[2], sizeof(values[2]), "%lu.%lu", static_cast<unsigned long>(paceTenths / 10),
-                static_cast<unsigned long>(paceTenths % 10));
-  std::snprintf(values[3], sizeof(values[3]), "%s", average);
+  std::snprintf(values[2], sizeof(values[2]), "%lu", static_cast<unsigned long>(stats.totalPageTurns));
+  std::snprintf(values[3], sizeof(values[3]), "%s", workReading);
   std::snprintf(values[4], sizeof(values[4]), "%u days", stats.currentStreakDays);
   std::snprintf(values[5], sizeof(values[5]), "%d", booksRead);
-  static constexpr const char* labels[] = {"SESSIONS", "READING TIME", "PAGES/MIN",
-                                            "AVG SESSION", "READING STREAK", "BOOKS READ"};
+  static constexpr const char* labelLine1[] = {"SESSIONS", "READING", "PAGES", "WORK", "READING", "BOOKS"};
+  static constexpr const char* labelLine2[] = {"", "TIME", "READ", "READING", "STREAK", "READ"};
   const int cardsY = tabsY + 54;
   const int cardW = (sw - side * 2) / 3;
   for (int i = 0; i < 6; ++i) {
     const int x = side + (i % 3) * cardW;
-    const int y = cardsY + (i / 3) * 58;
+    const int y = cardsY + (i / 3) * 74;
     UITheme::drawCenteredText(renderer, Rect{x, y, cardW, 28}, UI_12_FONT_ID, y, values[i], true,
                               EpdFontFamily::BOLD);
-    UITheme::drawCenteredText(renderer, Rect{x, y + 27, cardW, 22}, UI_10_FONT_ID, y + 27, labels[i]);
+    if (labelLine2[i][0] == '\0') {
+      UITheme::drawCenteredText(renderer, Rect{x + 4, y + 34, cardW - 8, 24}, UI_10_FONT_ID, y + 34,
+                                labelLine1[i]);
+    } else {
+      UITheme::drawCenteredText(renderer, Rect{x + 4, y + 27, cardW - 8, 24}, UI_10_FONT_ID, y + 27,
+                                labelLine1[i]);
+      UITheme::drawCenteredText(renderer, Rect{x + 4, y + 49, cardW - 8, 24}, UI_10_FONT_ID, y + 49,
+                                labelLine2[i]);
+    }
   }
 
   const auto drawBars = [&](const int top, const char* title, const char* const* names, const uint32_t* values,
                             const int valueCount) {
-    renderer.drawRect(side, top, sw - side * 2, 30 + valueCount * 30, true);
+    constexpr int rowStride = 32;
+    renderer.drawRect(side, top, sw - side * 2, 34 + valueCount * rowStride, true);
     UITheme::drawCenteredText(renderer, Rect{side, top + 4, sw - side * 2, 24}, UI_10_FONT_ID, top + 4, title, true,
                               EpdFontFamily::BOLD);
     uint32_t maximum = 1;
     for (int i = 0; i < valueCount; ++i) maximum = std::max(maximum, values[i]);
-    const int labelW = 74;
+    const int labelW = 128;
     const int barX = side + labelW;
     const int barMax = sw - side - barX - 12;
     for (int i = 0; i < valueCount; ++i) {
-      const int rowY = top + 34 + i * 30;
+      const int rowY = top + 38 + i * rowStride;
       renderer.drawText(UI_10_FONT_ID, side + 8, rowY, names[i]);
       const int width = static_cast<int>((static_cast<uint64_t>(values[i]) * barMax) / maximum);
-      if (width > 0) renderer.fillRect(barX, rowY + 3, width, 14, Black);
+      if (width > 0) renderer.fillRect(barX, rowY + 5, width, 10, Black);
     }
   };
   static constexpr const char* timeNames[] = {"Morning", "Afternoon", "Evening", "Night"};
   static constexpr const char* dayNames[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-  const int timeY = cardsY + 125;
+  const int timeY = cardsY + 165;
   drawBars(timeY, "TIME OF DAY", timeNames, stats.timeOfDaySeconds, 4);
-  drawBars(timeY + 162, "DAY OF WEEK", dayNames, stats.dayOfWeekSeconds, 7);
+  drawBars(timeY + 174, "DAY OF WEEK", dayNames, stats.dayOfWeekSeconds, 7);
   const auto hints = mappedInput.mapLabels("Back", "", "", "");
   GUI.drawButtonHints(renderer, hints.btn1, hints.btn2, hints.btn3, hints.btn4);
 }
@@ -646,9 +684,58 @@ void ReadingJournalActivity::drawSummary() {
   const int side = metrics.contentSidePadding;
   const auto& entry = entries[selected];
   GUI.drawHeader(renderer, Rect{0, metrics.topPadding, sw, metrics.headerHeight}, "BOOK SUMMARY");
-  const int heroY = metrics.topPadding + metrics.headerHeight + 28;
-  constexpr int coverW = 122;
-  constexpr int coverH = 190;
+
+#ifndef JOURNAL_BOOK_STATS_VARIANT
+#define JOURNAL_BOOK_STATS_VARIANT 1
+#endif
+  const int contentY = metrics.topPadding + metrics.headerHeight + 18;
+  int variant = JOURNAL_BOOK_STATS_VARIANT;
+#if defined(SIMULATOR)
+  if (const char* preview = std::getenv("CROSSPLAY_JOURNAL_VARIANT")) variant = std::clamp(std::atoi(preview), 1, 3);
+#endif
+  const int coverW = variant == 3 ? 86 : variant == 2 ? 112 : 122;
+  const int coverH = variant == 3 ? 132 : variant == 2 ? 174 : 190;
+  const int statsY = variant == 2 ? contentY : contentY + coverH + (variant == 3 ? 12 : 14);
+  const int heroY = variant == 2 ? statsY + 166 : contentY;
+
+  const auto drawBookStats = [&]() {
+    constexpr int panelH = 154;
+    const int panelW = sw - side * 2;
+    char readingTime[24];
+    char sessions[16];
+    char pages[16];
+    char readingDays[16];
+    char workReading[24];
+    char rating[16];
+    formatReadingTime(entry.readingSeconds, readingTime, sizeof(readingTime));
+    std::snprintf(sessions, sizeof(sessions), "%u", entry.readingSessions);
+    std::snprintf(pages, sizeof(pages), "%lu", static_cast<unsigned long>(entry.pageTurns));
+    std::snprintf(readingDays, sizeof(readingDays), "%u", entry.readingDays);
+    formatWorkReadingPay(entry.workReadingSeconds, workReading, sizeof(workReading));
+    if (entry.rating > 0)
+      std::snprintf(rating, sizeof(rating), "%u / 5", entry.rating);
+    else
+      std::snprintf(rating, sizeof(rating), "—");
+    const char* values[] = {sessions, readingTime, pages, readingDays, workReading, rating};
+    const char* labels1[] = {"SESSIONS", "READING", "PAGES", "READING", "WORK", "RATING"};
+    const char* labels2[] = {"", "TIME", "READ", "DAYS", "READING", ""};
+    renderer.drawRect(side, statsY, panelW, panelH, true);
+    for (int i = 0; i < 6; ++i) {
+      const bool secondRow = i >= 3;
+      const int row = secondRow ? 1 : 0;
+      constexpr int columns = 3;
+      const int width = panelW / columns;
+      const int column = secondRow ? i - 3 : i;
+      const int x = side + column * width;
+      const int y = statsY + 14 + row * 72;
+      UITheme::drawCenteredText(renderer, Rect{x, y, width, 25}, UI_10_FONT_ID, y, values[i], true,
+                                EpdFontFamily::BOLD);
+      UITheme::drawCenteredText(renderer, Rect{x + 3, y + 28, width - 6, 20}, UI_10_FONT_ID, y + 28, labels1[i]);
+      if (labels2[i][0] != '\0')
+        UITheme::drawCenteredText(renderer, Rect{x + 3, y + 47, width - 6, 20}, UI_10_FONT_ID, y + 47, labels2[i]);
+    }
+  };
+
   bool coverDrawn = false;
   const RecentBook book = RECENT_BOOKS.getDataFromBook(entry.path);
   if (!book.coverBmpPath.empty()) {
@@ -669,33 +756,31 @@ void ReadingJournalActivity::drawSummary() {
   }
   const int textX = side + coverW + 18;
   const int textW = sw - side - textX;
-  UITheme::drawCenteredWrappedText(renderer, Rect{textX, heroY + 15, textW, 92}, UI_12_FONT_ID, entry.title, 3, true,
+  UITheme::drawCenteredWrappedText(renderer, Rect{textX, heroY + 10, textW, 82}, UI_12_FONT_ID, entry.title, 3, true,
                                    EpdFontFamily::BOLD);
-  UITheme::drawCenteredWrappedText(renderer, Rect{textX, heroY + 112, textW, 58}, UI_10_FONT_ID,
+  UITheme::drawCenteredWrappedText(renderer, Rect{textX, heroY + coverH - 72, textW, 56}, UI_10_FONT_ID,
                                    entry.author[0] ? entry.author : "UNKNOWN AUTHOR", 2);
-  int y = heroY + coverH + 30;
-  summaryRowsRect = Rect{side, y - 12, sw - side * 2, 255};
+  drawBookStats();
+
+  const int contentBottom = std::max(heroY + coverH, statsY + 154);
+  int y = contentBottom + 16;
+  constexpr int rowH = 58;
+  summaryRowsRect = Rect{side, y - 6, sw - side * 2, rowH * 3};
   char stamp[40];
   formatStamp(entry.startedAt, stamp, sizeof(stamp));
-  if (summaryField == 0) renderer.drawRoundedRect(side - 8, y - 12, sw - side * 2 + 16, 76, 7, 2, true);
+  if (summaryField == 0) renderer.drawRoundedRect(side - 8, y - 6, sw - side * 2 + 16, rowH, 7, 2, true);
   renderer.drawText(UI_10_FONT_ID, side, y, "STARTED", true, EpdFontFamily::BOLD);
-  renderer.drawText(UI_12_FONT_ID, side, y + 27, stamp);
-  y += 85;
+  renderer.drawText(UI_10_FONT_ID, side + 112, y, stamp);
+  y += rowH;
   formatStamp(entry.finishedAt, stamp, sizeof(stamp));
-  if (summaryField == 1) renderer.drawRoundedRect(side - 8, y - 12, sw - side * 2 + 16, 76, 7, 2, true);
+  if (summaryField == 1) renderer.drawRoundedRect(side - 8, y - 6, sw - side * 2 + 16, rowH, 7, 2, true);
   renderer.drawText(UI_10_FONT_ID, side, y, "FINISHED", true, EpdFontFamily::BOLD);
-  renderer.drawText(UI_12_FONT_ID, side, y + 27, stamp);
-  y += 85;
-  if (summaryField == 2) renderer.drawRoundedRect(side - 8, y - 12, sw - side * 2 + 16, 92, 7, 2, true);
-  UITheme::drawCenteredText(renderer, Rect{side, y, sw - side * 2, 30}, UI_10_FONT_ID, y,
+  renderer.drawText(UI_10_FONT_ID, side + 112, y, stamp);
+  y += rowH;
+  if (summaryField == 2) renderer.drawRoundedRect(side - 8, y - 6, sw - side * 2 + 16, rowH, 7, 2, true);
+  UITheme::drawCenteredText(renderer, Rect{side, y - 2, sw - side * 2, 22}, UI_10_FONT_ID, y - 2,
                             entry.finishedAt ? "YOUR RATING" : "RATE WHEN FINISHED", true, EpdFontFamily::BOLD);
-  for (int i = 0; i < 5; ++i) drawStar(renderer, sw / 2 - 104 + i * 52, y + 48, 20, i < entry.rating);
-  char readingTime[32];
-  formatReadingTime(entry.readingSeconds, readingTime, sizeof(readingTime));
-  char timeLine[48];
-  std::snprintf(timeLine, sizeof(timeLine), "READING TIME  %s", readingTime);
-  UITheme::drawCenteredText(renderer, Rect{side, y + 79, sw - side * 2, 30}, UI_10_FONT_ID, y + 79, timeLine, true,
-                            EpdFontFamily::BOLD);
+  for (int i = 0; i < 5; ++i) drawStar(renderer, sw / 2 - 104 + i * 52, y + 36, 16, i < entry.rating);
   const auto labels = mappedInput.mapLabels("Calendar", "Select", "Field", summaryField == 2 ? "Rating" : "Date");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }

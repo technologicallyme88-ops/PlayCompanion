@@ -892,9 +892,11 @@ HomeCompanionLayout BaseTheme::getHomeCompanionLayout(const GfxRenderer& rendere
   return layout;
 }
 
-Rect BaseTheme::getHomeFarmPlotRect(const Rect) const { return {}; }
+Rect BaseTheme::getHomeFarmPlotRect(const Rect) const { return Rect{}; }
 
-void BaseTheme::drawHomeFarmPlot(const GfxRenderer&, const Rect, const bool) const {}
+int BaseTheme::getHomeFarmPlotIndex(const Rect, const int, const int) const { return -1; }
+
+void BaseTheme::drawHomeFarmPlot(const GfxRenderer&, const Rect, const int) const {}
 
 void BaseTheme::drawButtonMenu(GfxRenderer& renderer, Rect rect, int buttonCount, int selectedIndex,
                                const std::function<std::string(int index)>& buttonLabel,

@@ -21,12 +21,15 @@ struct Entry {
   uint16_t readingSessions = 0;
   uint32_t pageTurns = 0;
   uint32_t lastReadDate = 0;
+  uint16_t readingDays = 0;
+  uint32_t workReadingSeconds = 0;
 };
 
 struct Stats {
   uint32_t totalReadingSeconds = 0;
   uint32_t totalPageTurns = 0;
   uint32_t totalSessions = 0;
+  uint32_t workReadingSeconds = 0;
   uint16_t currentStreakDays = 0;
   uint16_t bestStreakDays = 0;
   uint32_t timeOfDaySeconds[4] = {};

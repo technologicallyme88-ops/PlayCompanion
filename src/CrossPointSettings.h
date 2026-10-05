@@ -166,6 +166,7 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
 
   // UI Theme
   enum UI_THEME { CLASSIC = 0, LYRA = 1, LYRA_3_COVERS = 2, ROUNDEDRAFF = 3, HARVEST = 4 };
+  enum HOME_INFO_DISPLAY { HOME_INFO_OFF = 0, HOME_INFO_COMPANION = 1, HOME_INFO_FARM = 2, HOME_INFO_DISPLAY_COUNT };
 
   // Image rendering in EPUB reader
   enum IMAGE_RENDERING { IMAGES_DISPLAY = 0, IMAGES_PLACEHOLDER = 1, IMAGES_SUPPRESS = 2, IMAGE_RENDERING_COUNT };
@@ -292,6 +293,8 @@ class CrossPointSettings : public PersistableStore<CrossPointSettings> {
   // Draw the companion on the home screen (0 = off, 1 = on).
   // Enable the Harvest farm panel and its reading-driven crop progression.
   uint8_t farmingEnabled = 1;
+  // Select the content shown in the Home companion's information area.
+  uint8_t homeInfoDisplay = HOME_INFO_COMPANION;
   // SD card font family name (empty = use built-in fontFamily)
   char sdFontFamilyName[32] = "";
   // Dictionary folder name under /dictionaries (empty = no dictionary)

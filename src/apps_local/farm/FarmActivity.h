@@ -47,6 +47,7 @@ class FarmActivity final : public Activity {
   int farmPreviewY_ = 0;
   int farmPreviewW_ = 0;
   int farmPreviewH_ = 0;
+  uint32_t nextVitalRefreshMs_ = 0;
   std::array<char, 128> feedback_{};
 };
 

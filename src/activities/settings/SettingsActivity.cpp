@@ -179,6 +179,8 @@ void SettingsActivity::rebuildRowItems() {
     } else if (settings[i].nameId == StrId::STR_COMPANION_CHARACTER_NESTED) {
       item.joinsPrevious = true;
     }
+    if (settings[i].valuePtr == &CrossPointSettings::farmingEnabled) item.joinsNext = true;
+    if (settings[i].valuePtr == &CrossPointSettings::homeInfoDisplay) item.joinsPrevious = true;
     item.actionValue = static_cast<int16_t>(i);
     rowItems_.push_back(item);
   }

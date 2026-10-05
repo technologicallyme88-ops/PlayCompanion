@@ -28,5 +28,6 @@ class HarvestTheme final : public LyraTheme {
                            int selectorIndex, bool& coverRendered, bool& coverBufferStored, bool& bufferRestored,
                            std::function<bool()> storeCoverBuffer) const override;
   Rect getHomeFarmPlotRect(Rect coverRect) const override;
-  void drawHomeFarmPlot(const GfxRenderer& renderer, Rect rect, bool selected = false) const override;
+  int getHomeFarmPlotIndex(Rect rect, int x, int y) const override;
+  void drawHomeFarmPlot(const GfxRenderer& renderer, Rect rect, int selectedPlot = -1) const override;
 };
