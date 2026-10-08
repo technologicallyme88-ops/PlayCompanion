@@ -20,12 +20,15 @@ void header(toybox::Screen& screen, const char* title) {
 }
 
 void button(toybox::Screen& screen, const fui::Rect& rect, const char* label, const fui::ActionId action,
-            const int value = 0, const bool outline = false) {
+            const int value = 0, const bool = false) {
   fui::ButtonProps props;
   props.label = label;
   props.action = action;
   props.value = value;
-  if (outline) props.styles = toybox::rowStyles();
+  // A focused GPIO button must differ visibly from an idle button. The old
+  // inverted style rendered every option black, so X3/X4 focus movement was
+  // indistinguishable from no input at all.
+  props.styles = toybox::rowStyles();
   screen.button(props, rect);
 }
 
@@ -39,9 +42,11 @@ void text(toybox::Screen& screen, const fui::Rect& rect, const char* value, cons
 }
 
 const char* roomCopy(const dungeonrun::Room& room, const dungeonrun::Game& game) {
-  if (game.enemyAlive()) return room.kind == dungeonrun::Kind::Boss ? "THE WARDEN BARS THE LAST DOOR." : "SOMETHING MOVES IN THE DARK.";
+  if (game.enemyAlive())
+    return room.kind == dungeonrun::Kind::Boss ? "THE WARDEN BARS THE LAST DOOR." : "SOMETHING MOVES IN THE DARK.";
   switch (room.kind) {
-    case dungeonrun::Kind::Start: return "YOUR BROKEN CHAINS LIE IN THE DUST.";
+    case dungeonrun::Kind::Start:
+      return "YOUR BROKEN CHAINS LIE IN THE DUST.";
     case dungeonrun::Kind::Fountain:
       return game.fountainUsed() ? "THE WATER HAS GONE STILL." : "COLD WATER RUNS BENEATH THE STONE.";
     case dungeonrun::Kind::Key:
@@ -50,17 +55,23 @@ const char* roomCopy(const dungeonrun::Room& room, const dungeonrun::Game& game)
       if (game.damage() < 3) return "THE OLD FORGE CAN STRENGTHEN YOUR WEAPON.";
       if (!game.hasShield()) return "THE OLD FORGE CAN FIT YOU WITH A SHIELD.";
       return "THE FORGE HAS NOTHING MORE TO OFFER.";
-    case dungeonrun::Kind::Ladder: return "THE STAIR CLIMBS INTO OLDER DARKNESS.";
+    case dungeonrun::Kind::Ladder:
+      return "THE STAIR CLIMBS INTO OLDER DARKNESS.";
     case dungeonrun::Kind::Trap:
-      return game.cleared(game.room()) ? "THE SPIKES ARE JAMMED. THE WAY IS CLEAR." : "SPIKES CLOSE AROUND YOU. ROLL TO BREAK FREE.";
+      return game.cleared(game.room()) ? "THE SPIKES ARE JAMMED. THE WAY IS CLEAR."
+                                       : "SPIKES CLOSE AROUND YOU. ROLL TO BREAK FREE.";
     case dungeonrun::Kind::Puzzle:
-      return game.cleared(game.room()) ? "THE RUNES ARE DARK. YOU TOOK THEIR COINS." : "TWO BONES PLUS TWO BONES. CHOOSE THE TOTAL.";
+      return game.cleared(game.room()) ? "THE RUNES ARE DARK. YOU TOOK THEIR COINS."
+                                       : "TWO BONES PLUS TWO BONES. CHOOSE THE TOTAL.";
     case dungeonrun::Kind::Shrine:
-      return game.cleared(game.room()) ? "THE SHRINE'S BLESSING HAS FADED." : "A QUIET SHRINE OFFERS A SINGLE BLESSING.";
+      return game.cleared(game.room()) ? "THE SHRINE'S BLESSING HAS FADED."
+                                       : "A QUIET SHRINE OFFERS A SINGLE BLESSING.";
     case dungeonrun::Kind::Treasure:
       return game.cleared(game.room()) ? "THE TREASURE CHEST IS EMPTY." : "AN OLD CHEST WAITS BENEATH THE DUST.";
-    case dungeonrun::Kind::Boss: return "DAYLIGHT CUTS THROUGH THE OPEN DOOR.";
-    default: return "THE PASSAGE IS QUIET NOW.";
+    case dungeonrun::Kind::Boss:
+      return "DAYLIGHT CUTS THROUGH THE OPEN DOOR.";
+    default:
+      return "THE PASSAGE IS QUIET NOW.";
   }
 }
 
@@ -79,8 +90,7 @@ void buildMenu(toybox::Screen& screen, const MenuModel& model) {
   text(screen, fui::makeRect(kMargin + 12, heroY, bounds.width - 2 * kMargin - 24, 104), "BREAK OUT. GO DEEP.",
        toybox::kDisplayFont, fui::TextAlign::Center, 2);
   text(screen, fui::makeRect(64, heroY + 112, bounds.width - 128, 116),
-       "MAP TWO FLOORS. FIGHT MONSTERS. OPEN THE LAST DOOR.", toybox::kUiFont,
-       fui::TextAlign::Center, 3);
+       "MAP TWO FLOORS. FIGHT MONSTERS. OPEN THE LAST DOOR.", toybox::kUiFont, fui::TextAlign::Center, 3);
 
   char record[64];
   std::snprintf(record, sizeof(record), "%d ROOMS FOUND  /  %d DEATHS", model.visited, model.deaths);
@@ -95,7 +105,7 @@ void buildMenu(toybox::Screen& screen, const MenuModel& model) {
     ++slot;
   }
   button(screen, fui::makeRect(kMargin + slot * (width + kGap), buttonY, width, toybox::kPillHeight),
-         model.hasSave ? "START OVER" : "DESCEND", ActionNew, 0, model.hasSave);
+         model.hasSave ? "NEW RUN" : "DESCEND", ActionNew, 0, model.hasSave);
   ++slot;
   button(screen, fui::makeRect(kMargin + slot * (width + kGap), buttonY, width, toybox::kPillHeight), "HOW TO",
          ActionHowTo, 0, true);
@@ -107,10 +117,16 @@ void buildRoom(toybox::Screen& screen, const RoomModel& model) {
   header(screen, room.name);
   const fui::Rect bounds = screen.device().screen();
 
-  char stats[80];
-  std::snprintf(stats, sizeof(stats), "HP %d/10   COINS %d   DMG %d   KEYS %d", game.hp(), game.coins(), game.damage(),
-                game.keys());
-  text(screen, fui::makeRect(kMargin, 104, bounds.width - 2 * kMargin, 30), stats, toybox::kUiFont);
+  char stats[4][16];
+  std::snprintf(stats[0], sizeof(stats[0]), "HP %d/10", game.hp());
+  std::snprintf(stats[1], sizeof(stats[1]), "COINS %d", game.coins());
+  std::snprintf(stats[2], sizeof(stats[2]), "DMG %d", game.damage());
+  std::snprintf(stats[3], sizeof(stats[3]), "KEYS %d", game.keys());
+  const int statWidth = (bounds.width - 2 * kMargin) / 4;
+  for (int i = 0; i < 4; ++i) {
+    text(screen, fui::makeRect(kMargin + i * statWidth, 104, statWidth, 30), stats[i], toybox::kSmallFont,
+         fui::TextAlign::Center);
+  }
 
   // Room prose is information, not a second headline. The display cut needed
   // three or four lines here and was still truncating the final word on the
@@ -119,8 +135,7 @@ void buildRoom(toybox::Screen& screen, const RoomModel& model) {
   text(screen, fui::makeRect(kMargin + 20, 154, bounds.width - 2 * kMargin - 40, 104), roomCopy(room, game),
        toybox::kUiFont, fui::TextAlign::Center, 3);
   if (model.message != nullptr) {
-    text(screen, fui::makeRect(kMargin + 8, 276, bounds.width - 2 * kMargin - 16, 34), model.message,
-         toybox::kTileFont,
+    text(screen, fui::makeRect(kMargin + 8, 276, bounds.width - 2 * kMargin - 16, 34), model.message, toybox::kTileFont,
          fui::TextAlign::Center);
   }
 
@@ -151,8 +166,8 @@ void buildRoom(toybox::Screen& screen, const RoomModel& model) {
     const bool smithUseful = room.kind == dungeonrun::Kind::Smith && (game.damage() < 3 || !game.hasShield());
     const bool oneTimeUseful = (room.kind == dungeonrun::Kind::Shrine || room.kind == dungeonrun::Kind::Treasure) &&
                                !game.cleared(game.room());
-    const bool useful = room.kind == dungeonrun::Kind::Key || room.kind == dungeonrun::Kind::Fountain || smithUseful ||
-                        oneTimeUseful;
+    const bool useful =
+        room.kind == dungeonrun::Kind::Key || room.kind == dungeonrun::Kind::Fountain || smithUseful || oneTimeUseful;
     if (useful && (room.kind != dungeonrun::Kind::Key || !game.keyFound())) {
       char forgeLabel[32];
       const char* label = "SEARCH";
@@ -168,8 +183,8 @@ void buildRoom(toybox::Screen& screen, const RoomModel& model) {
       } else if (room.kind == dungeonrun::Kind::Treasure) {
         label = "OPEN CHEST";
       }
-      button(screen, fui::makeRect(kMargin, 326, bounds.width - 2 * kMargin, toybox::kPillHeight), label, ActionAct,
-             0, true);
+      button(screen, fui::makeRect(kMargin, 326, bounds.width - 2 * kMargin, toybox::kPillHeight), label, ActionAct, 0,
+             true);
     }
   }
 
@@ -181,8 +196,8 @@ void buildRoom(toybox::Screen& screen, const RoomModel& model) {
   const int dirW = (bounds.width - 2 * kMargin - 3 * 6) / 4;
   for (int d = 0; d < 4; ++d) {
     if (!game.canMove(static_cast<dungeonrun::Direction>(d))) continue;
-    button(screen, fui::makeRect(kMargin + d * (dirW + 6), dirY, dirW, toybox::kPillHeight), kDirName[d], ActionMove,
-           d, true);
+    button(screen, fui::makeRect(kMargin + d * (dirW + 6), dirY, dirW, toybox::kPillHeight), kDirName[d], ActionMove, d,
+           true);
   }
   const fui::Rect mapButton =
       fui::makeRect(kMargin, bounds.height - 104, bounds.width - 2 * kMargin, toybox::kPillHeight);
@@ -236,7 +251,9 @@ void buildHowTo(toybox::Screen& screen) {
   const fui::Rect bounds = screen.device().screen();
   const int instructionsBottom = bounds.height - 128;
   text(screen, fui::makeRect(36, 112, bounds.width - 72, instructionsBottom - 112),
-       "EXPLORE ROOMS OR QUICK-TRAVEL WITH THE MAP. MONSTERS AND TRAPS BLOCK ESCAPE. ROLL TO FIGHT OR BREAK FREE. ENEMIES STAY WOUNDED AFTER DEATH. SOLVE PUZZLES AND SEARCH TREASURE FOR COINS. SHRINES HEAL ONCE. KEYS OPEN PASSAGES. BUY GEAR AT THE FORGE. DEFEAT THE WARDEN.",
+       "EXPLORE ROOMS OR QUICK-TRAVEL WITH THE MAP. MONSTERS AND TRAPS BLOCK ESCAPE. ROLL TO FIGHT OR BREAK FREE. "
+       "ENEMIES STAY WOUNDED AFTER DEATH. SOLVE PUZZLES AND SEARCH TREASURE FOR COINS. SHRINES HEAL ONCE. KEYS OPEN "
+       "PASSAGES. BUY GEAR AT THE FORGE. DEFEAT THE WARDEN.",
        toybox::kUiFont, fui::TextAlign::Left, 13);
   button(screen, fui::makeRect(kMargin, bounds.height - 104, bounds.width - 2 * kMargin, toybox::kPillHeight), "BACK",
          ActionBack, 0, true);

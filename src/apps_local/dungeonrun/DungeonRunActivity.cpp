@@ -21,23 +21,40 @@ constexpr char kSavePath[] = "/.crosspoint/dungeon-run.sav";
 
 const char* resultText(const dungeonrun::Result result) {
   switch (result) {
-    case dungeonrun::Result::Miss: return "MISS. THE DARK LAUGHS.";
-    case dungeonrun::Result::Hit: return "HIT. IT STAGGERS.";
-    case dungeonrun::Result::Blocked: return "THE SHIELD TAKES THE BLOW.";
-    case dungeonrun::Result::Hurt: return "THE MONSTER HITS FOR 2 HP.";
-    case dungeonrun::Result::Victory: return "VICTORY. TAKE THE COINS.";
-    case dungeonrun::Result::Death: return "DEFEATED. YOUR FOE STAYS WOUNDED.";
-    case dungeonrun::Result::Bought: return "THE FORGE MAKES YOU STRONGER.";
-    case dungeonrun::Result::Healed: return "THE WATER RESTORES 10 HP.";
-    case dungeonrun::Result::KeyFound: return "YOU TAKE THE IRON KEY.";
-    case dungeonrun::Result::StaleWater: return "THE WATER DOES NOT FEEL AS FRESH.";
-    case dungeonrun::Result::TrapFailed: return "THE SPIKES BITE. LOSE 1 HP.";
-    case dungeonrun::Result::TrapEscaped: return "THE TRAP BREAKS. YOU ARE FREE.";
-    case dungeonrun::Result::PuzzleWrong: return "THE RUNES REJECT THAT ANSWER.";
-    case dungeonrun::Result::PuzzleSolved: return "THE RUNES OPEN. TAKE 6 COINS.";
-    case dungeonrun::Result::Blessed: return "THE SHRINE RESTORES UP TO 4 HP.";
-    case dungeonrun::Result::TreasureFound: return "THE CHEST HOLDS 8 COINS.";
-    default: return nullptr;
+    case dungeonrun::Result::Miss:
+      return "MISS. THE DARK LAUGHS.";
+    case dungeonrun::Result::Hit:
+      return "HIT. IT STAGGERS.";
+    case dungeonrun::Result::Blocked:
+      return "THE SHIELD TAKES THE BLOW.";
+    case dungeonrun::Result::Hurt:
+      return "THE MONSTER HITS FOR 2 HP.";
+    case dungeonrun::Result::Victory:
+      return "VICTORY. TAKE THE COINS.";
+    case dungeonrun::Result::Death:
+      return "DEFEATED. YOUR FOE STAYS WOUNDED.";
+    case dungeonrun::Result::Bought:
+      return "THE FORGE MAKES YOU STRONGER.";
+    case dungeonrun::Result::Healed:
+      return "THE WATER RESTORES 10 HP.";
+    case dungeonrun::Result::KeyFound:
+      return "YOU TAKE THE IRON KEY.";
+    case dungeonrun::Result::StaleWater:
+      return "THE WATER DOES NOT FEEL AS FRESH.";
+    case dungeonrun::Result::TrapFailed:
+      return "THE SPIKES BITE. LOSE 1 HP.";
+    case dungeonrun::Result::TrapEscaped:
+      return "THE TRAP BREAKS. YOU ARE FREE.";
+    case dungeonrun::Result::PuzzleWrong:
+      return "THE RUNES REJECT THAT ANSWER.";
+    case dungeonrun::Result::PuzzleSolved:
+      return "THE RUNES OPEN. TAKE 6 COINS.";
+    case dungeonrun::Result::Blessed:
+      return "THE SHRINE RESTORES UP TO 4 HP.";
+    case dungeonrun::Result::TreasureFound:
+      return "THE CHEST HOLDS 8 COINS.";
+    default:
+      return nullptr;
   }
 }
 
@@ -108,9 +125,8 @@ void DungeonRunActivity::route(const int action, const int value) {
     case ui::ActionAct: {
       const bool fightingWarden = dungeonrun::kRooms[game.room()].kind == dungeonrun::Kind::Boss && game.enemyAlive();
       const dungeonrun::Result result = game.act();
-      message = result == dungeonrun::Result::Death && fightingWarden
-                    ? "WARDEN WOUNDED. RETURN BY MAP."
-                    : resultText(result);
+      message =
+          result == dungeonrun::Result::Death && fightingWarden ? "WARDEN WOUNDED. RETURN BY MAP." : resultText(result);
       if (result == dungeonrun::Result::Escaped) {
         view = View::Won;
         flashOnNextPaint = true;
@@ -165,6 +181,26 @@ void DungeonRunActivity::loop() {
   }
 
   fui::InputSnapshot input{};
+  if (!mappedInput.hasTouch()) {
+    input.focusNext = mappedInput.wasReleased(MappedInputManager::Button::NavNext);
+    input.focusPrev = mappedInput.wasReleased(MappedInputManager::Button::NavPrevious);
+    input.confirm = mappedInput.wasReleased(MappedInputManager::Button::Confirm);
+    if ((!input.focusNext && !input.focusPrev && !input.confirm) || !interactionsReady) return;
+
+    const int16_t previousFocus = interactions.focusedIndex();
+    const fui::ActionEvent hit = interactions.route(input);
+    if (interactions.focusedIndex() != previousFocus) requestUpdate();
+    if (hit.action != fui::NO_ACTION) {
+      const int action = static_cast<int>(hit.action);
+      if (action == ui::ActionNew || action == ui::ActionResume || action == ui::ActionHowTo ||
+          action == ui::ActionMap || action == ui::ActionTravel || action == ui::ActionBack) {
+        interactions.setFocusedIndex(0);
+      }
+      route(static_cast<int>(hit.action), static_cast<int>(hit.value));
+    }
+    return;
+  }
+
   int tapX = 0;
   int tapY = 0;
   bool tapped = mappedInput.wasScreenTapped(tapX, tapY);
@@ -216,11 +252,15 @@ void DungeonRunActivity::render(RenderLock&&) {
 
   interactionsReady = true;
   toybox::reportOverflow(interactions, "Dungeon Run");
-  const auto labels = mappedInput.mapLabels("Back", "", "", "");
+  const bool seedButtonFocus =
+      !mappedInput.hasTouch() && interactions.count() > 0 &&
+      (interactions.focusedIndex() < 0 || interactions.focusedIndex() >= static_cast<int16_t>(interactions.count()));
+  if (seedButtonFocus) interactions.setFocusedIndex(0);
+  const auto labels = mappedInput.mapLabels("Back", "Select", "Up", "Down");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
-  gameinput::drawPointer(renderer, mappedInput);
   renderer.displayBuffer(flashOnNextPaint ? HalDisplay::FULL_REFRESH : HalDisplay::FAST_REFRESH);
   flashOnNextPaint = false;
+  if (seedButtonFocus) requestUpdate();
 }
 
 void DungeonRunActivity::saveState() const {

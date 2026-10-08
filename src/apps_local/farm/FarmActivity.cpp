@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstdio>
 
+#include "FarmAssets.h"
 #include "FarmState.h"
 #include "FarmWeather.h"
 #include "components/UITheme.h"
@@ -73,8 +74,7 @@ void FarmActivity::onEnter() {
   if (FARM_STATE.refreshForToday() && !FARM_STATE.saveToFile()) LOG_ERR("FARM", "Failed to save timed decay");
   // Keep the optional crop-art location available on fresh cards. The theme
   // still has a built-in four-stage renderer when no bitmap pack is installed.
-  Storage.mkdir("/.crosspoint/harvest");
-  Storage.mkdir("/.crosspoint/harvest/crops");
+  ensureCropAssets();
   refreshWeatherIfDue();
   nextVitalRefreshMs_ = millis() + 60000;
   setScreen(Screen::Menu);
@@ -99,7 +99,7 @@ int FarmActivity::itemCount() const {
     case Screen::Harvest:
       return 1;
     case Screen::Sell:
-      return 1;
+      return inventoryCount();
     case Screen::Care:
       return 5;
     case Screen::Shop:
@@ -126,7 +126,7 @@ const char* FarmActivity::title() const {
     case Screen::Harvest:
       return tr(STR_FARM_HARVEST);
     case Screen::Sell:
-      return tr(STR_FARM_SELL_CROPS);
+      return "Bag";
     case Screen::Care:
       return tr(STR_FARM_CARE);
     case Screen::Shop:
@@ -160,6 +160,29 @@ void FarmActivity::saveIfChanged(const bool changed, const char* unchangedFeedba
   requestUpdate();
 }
 
+int FarmActivity::inventoryCount() const {
+  int count = 0;
+  for (uint8_t cropId = 1; cropId <= CROP_COUNT; ++cropId) {
+    for (uint8_t branch = 0; branch < 3; ++branch) {
+      if (FARM_STATE.harvestedCount(cropId, static_cast<CropBranch>(branch)) > 0) ++count;
+    }
+  }
+  return count;
+}
+
+bool FarmActivity::inventoryItem(const int index, uint8_t& cropId, uint8_t& branch) const {
+  int current = 0;
+  for (cropId = 1; cropId <= CROP_COUNT; ++cropId) {
+    for (branch = 0; branch < 3; ++branch) {
+      if (FARM_STATE.harvestedCount(cropId, static_cast<CropBranch>(branch)) == 0) continue;
+      if (current++ == index) return true;
+    }
+  }
+  cropId = 0;
+  branch = 0;
+  return false;
+}
+
 void FarmActivity::activate() {
   switch (screen_) {
     case Screen::Menu: {
@@ -174,11 +197,29 @@ void FarmActivity::activate() {
       break;
     }
     case Screen::Harvest:
-      saveIfChanged(FARM_STATE.harvestAll(), tr(STR_FARM_NOTHING_TO_HARVEST));
+      if (FARM_STATE.harvestAll()) {
+        if (!FARM_STATE.saveToFile()) LOG_ERR("FARM", "Failed to save harvest");
+        snprintf(feedback_.data(), feedback_.size(), "Harvest completed.");
+        requestUpdate();
+      } else {
+        saveIfChanged(false, tr(STR_FARM_NOTHING_TO_HARVEST));
+      }
       break;
-    case Screen::Sell:
-      saveIfChanged(FARM_STATE.sellAll());
+    case Screen::Sell: {
+      uint8_t cropId = 0;
+      uint8_t branch = 0;
+      if (!inventoryItem(selected_, cropId, branch)) break;
+      const auto quality = static_cast<CropBranch>(branch);
+      const uint16_t value = FARM_STATE.branchSellPrice(cropId, quality);
+      if (FARM_STATE.sellOne(cropId, quality)) {
+        if (!FARM_STATE.saveToFile()) LOG_ERR("FARM", "Failed to save crop sale");
+        snprintf(feedback_.data(), feedback_.size(), "Sold %s %s for %u %s.", branchName(quality),
+                 I18N.get(CROP_NAMES[cropId - 1]), value, tr(STR_FARM_COIN));
+        selected_ = std::clamp(selected_, 0, std::max(0, itemCount() - 1));
+        requestUpdate();
+      }
       break;
+    }
     case Screen::Care:
       saveIfChanged(FARM_STATE.careForPlot(static_cast<CareAction>(selected_), selectedPlot_));
       break;
@@ -354,7 +395,7 @@ void FarmActivity::renderList() {
         if (i == 5 && FARM_STATE.claimableQuestCount() > 0)
           snprintf(label, sizeof(label), "%s (%u)", I18N.get(MENU_NAMES[i]), FARM_STATE.claimableQuestCount());
         else
-          snprintf(label, sizeof(label), "%s", I18N.get(MENU_NAMES[i]));
+          snprintf(label, sizeof(label), "%s", i == 2 ? "Bag" : I18N.get(MENU_NAMES[i]));
         break;
       case Screen::Seeds: {
         const uint8_t cropId = static_cast<uint8_t>(FARM_STATE.season() * 2 + i + 1);
@@ -370,13 +411,27 @@ void FarmActivity::renderList() {
         snprintf(label, sizeof(label), "%s", tr(STR_FARM_HARVEST));
         snprintf(detail, sizeof(detail), "%s", tr(STR_FARM_HARVEST_HELP));
         break;
-      case Screen::Sell:
-        snprintf(label, sizeof(label), "%s", tr(STR_FARM_SELL_CROPS));
-        snprintf(detail, sizeof(detail), "%s", tr(STR_FARM_SELL_HELP));
+      case Screen::Sell: {
+        uint8_t cropId = 0;
+        uint8_t branch = 0;
+        if (!inventoryItem(i, cropId, branch)) break;
+        const auto quality = static_cast<CropBranch>(branch);
+        const uint16_t quantity = FARM_STATE.harvestedCount(cropId, quality);
+        snprintf(label, sizeof(label), "%s %s  x%u", branchName(quality), I18N.get(CROP_NAMES[cropId - 1]), quantity);
+        snprintf(detail, sizeof(detail), "%u %s each", FARM_STATE.branchSellPrice(cropId, quality), tr(STR_FARM_COIN));
         break;
+      }
       case Screen::Care:
         snprintf(label, sizeof(label), "%s", I18N.get(CARE_NAMES[i]));
-        snprintf(detail, sizeof(detail), "%s", I18N.get(CARE_HELP[i]));
+        if (FARM_STATE.careCreditCount() > 0) {
+          static constexpr const char* CREDIT_HELP[5] = {
+              "Care Credit: +18 moisture.",  "Care Credit: +14 light.",           "Care Credit: +16 health.",
+              "Care Credit: +16 nutrients.", "Care Credit: +7 health, +4 light.",
+          };
+          snprintf(detail, sizeof(detail), "%s", CREDIT_HELP[i]);
+        } else {
+          snprintf(detail, sizeof(detail), "%s", I18N.get(CARE_HELP[i]));
+        }
         if (i == 0) snprintf(label, sizeof(label), "%s (%u/3)", I18N.get(CARE_NAMES[i]), FARM_STATE.waterCharges());
         if (i == 3)
           snprintf(label, sizeof(label), "%s (%u/3)", I18N.get(CARE_NAMES[i]), FARM_STATE.fertilizerCharges());
@@ -537,7 +592,7 @@ void FarmActivity::render(RenderLock&&) {
     } else {
       char headerStatus[32];
       const char* subtitle = nullptr;
-      if (screen_ == Screen::Seeds) {
+      if (screen_ == Screen::Seeds || screen_ == Screen::Sell) {
         snprintf(headerStatus, sizeof(headerStatus), "%s: %u", tr(STR_FARM_COINS), FARM_STATE.coinBalance());
         subtitle = headerStatus;
       }
@@ -548,6 +603,10 @@ void FarmActivity::render(RenderLock&&) {
     rowHeight_ = screen_ == Screen::Care || screen_ == Screen::Shop ? 72 : 64;
     visibleRows_ = std::max(1, available / rowHeight_);
     renderList();
+    if (screen_ == Screen::Sell && itemCount() == 0) {
+      UITheme::drawCenteredText(renderer, Rect{SIDE, listTop_ + 40, sw - SIDE * 2, 80}, UI_12_FONT_ID, listTop_ + 54,
+                                "Your bag is empty.");
+    }
     if (screen_ == Screen::Care) {
       const Plot& plot = FARM_STATE.getPlots()[careStatsPlot_];
       if (plot.cropId != 0) {

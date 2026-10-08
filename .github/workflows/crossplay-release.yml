@@ -110,26 +110,27 @@ jobs:
           # new in CrossPlay". A release note is a thing you write.
           generate_release_notes: false
           body: |
-            ## Farm and reading
+            ## Reading and quests
 
-            - Farm state now loads before wake restoration, preventing plots and
-              progress from resetting after sleep, reboot, or firmware updates.
-            - Farm weather, crop care stats, growth stages, streak quests, and
-              localized weather effects are persisted and restored reliably.
-            - Reading Journal adds calendar date selection and a month-grouped list view.
+            - Page totals and reading quests now count forward reading only; backward
+              turns and multi-page skips no longer inflate progress.
+            - Night Owl begins at 8 PM and the care-help values match the actual effects.
+            - X3/X4 button navigation can select calendar dates and open Journal list,
+              stats, and book-summary views.
 
-            ## Games and navigation
+            ## Farm
 
-            - Terminal Hack adds difficulty selection, XP progression, level wins,
-              swipe/page navigation, and precise power-code touch targets.
-            - Home navigation restores the last selected item and includes Farm.
-            - Pokémon tile hit areas and encounter controls are aligned to their visuals.
-            - Multiplayer Knucklebones rematches give the first turn to the prior loser.
+            - Crop artwork is installed from firmware when the SD card lacks the current assets.
+            - Harvest and single-crop sale feedback identify the completed action and crop quality.
+            - The sell screen shows a live coin balance and selectable inventory entries.
 
-            ## Power and compatibility
+            ## X3/X4 controls and layout
 
-            - Charger connections preserve the device's existing frontlight state.
-            - Wake restores the active page instead of always returning Home.
+            - The home companion column is centered correctly on non-Pro displays.
+            - Terminal Hack exposes visible button focus and selectable post-level actions.
+            - Dungeon Run supports hardware-button focus, keeps room statistics on-screen,
+              and replaces the touch-pointer-only controls.
+
             - X3, X4, and X4 Pro production images are built from the same release.
 
             ## Firmware files

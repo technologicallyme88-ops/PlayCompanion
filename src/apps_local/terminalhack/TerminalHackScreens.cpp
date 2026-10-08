@@ -29,8 +29,8 @@ int hackSlot(const terminalhack::Game& game, const int hack) {
   static constexpr uint8_t kTwoPageSteps[] = {5, 7, 11, 13};
   const int slotCount = game.candidateCount > 12 ? 24 : 12;
   const int offset = static_cast<int>((game.seed >> 7) % slotCount);
-  const int step = game.candidateCount > 12 ? kTwoPageSteps[(game.seed >> 13) % 4]
-                                            : kOnePageSteps[(game.seed >> 13) % 4];
+  const int step =
+      game.candidateCount > 12 ? kTwoPageSteps[(game.seed >> 13) % 4] : kOnePageSteps[(game.seed >> 13) % 4];
   return (offset + hack * step) % slotCount;
 }
 
@@ -84,8 +84,7 @@ void dumpCell(toybox::Screen& screen, const terminalhack::Game& game, int page, 
     for (int hack = 0; hack < terminalhack::kHackCount; ++hack) {
       if (hackSlot(game, hack) != slot) continue;
       static constexpr const char* kSequences[] = {"(<+>)", "{#|#}", "[!?!]", "<^&>"};
-      const uint32_t sequenceIndex =
-          ((game.seed >> (hack * 3)) + static_cast<uint32_t>(hack)) % 4U;
+      const uint32_t sequenceIndex = ((game.seed >> (hack * 3)) + static_cast<uint32_t>(hack)) % 4U;
       const char* sequence = kSequences[sequenceIndex];
       std::memcpy(text + bracketOffset, game.hackUsed[hack] ? "....." : sequence, 5);
       if (!game.hackUsed[hack]) {
@@ -109,8 +108,7 @@ void dumpCell(toybox::Screen& screen, const terminalhack::Game& game, int page, 
   if (focused) screen.target().stroke(focusRect, fui::Paint::solid(fui::Color::Black), 2);
 }
 
-void transcript(toybox::Screen& screen, const terminalhack::Game& game, const fui::Rect& box,
-                const char* notice) {
+void transcript(toybox::Screen& screen, const terminalhack::Game& game, const fui::Rect& box, const char* notice) {
   fui::TextStyle text;
   text.font = toybox::kSmallFont;
   text.align = fui::TextAlign::Left;
@@ -177,21 +175,24 @@ void buildMenu(toybox::Screen& screen, const Model& model) {
     difficulty.label = label;
     difficulty.action = ActionDifficulty;
     difficulty.value = static_cast<int16_t>(i);
+    difficulty.styles = toybox::rowStyles();
     screen.button(difficulty, screen.takeTop(48, 8));
   }
 
   fui::ButtonProps dailyButton;
   dailyButton.label = "DAILY TERMINAL";
   dailyButton.action = ActionDaily;
+  dailyButton.styles = toybox::rowStyles();
   // Keep this actionable so a press can re-read a clock synchronized after
   // the menu was rendered, including the first press after midnight.
   dailyButton.enabled = true;
   screen.button(dailyButton, screen.takeTop(52, 12));
 
   char today[48];
-  std::snprintf(today, sizeof(today), "TODAY: %s", !model.dailyAvailable ? "CLOCK NEEDED"
-                                                    : model.dailyComplete ? "COMPLETE"
-                                                                          : "NOT COMPLETE");
+  std::snprintf(today, sizeof(today), "TODAY: %s",
+                !model.dailyAvailable ? "CLOCK NEEDED"
+                : model.dailyComplete ? "COMPLETE"
+                                      : "NOT COMPLETE");
   screen.target().text(screen.takeTop(28), today, text);
 }
 
@@ -213,8 +214,7 @@ void buildBoard(toybox::Screen& screen, const Model& model) {
                          game.result == terminalhack::Result::Won ? "ACCESS GRANTED" : "TERMINAL LOCKED", result);
     if (!model.daily) {
       char xp[32];
-      std::snprintf(xp, sizeof(xp), game.xpDelta >= 0 ? "XP GAINED +%d" : "XP LOST %d",
-                    static_cast<int>(game.xpDelta));
+      std::snprintf(xp, sizeof(xp), game.xpDelta >= 0 ? "XP GAINED +%d" : "XP LOST %d", static_cast<int>(game.xpDelta));
       fui::TextStyle xpText;
       xpText.font = toybox::kUiFont;
       xpText.align = fui::TextAlign::Center;
@@ -229,10 +229,11 @@ void buildBoard(toybox::Screen& screen, const Model& model) {
       fui::progressBar(screen.frame(), screen.takeTop(12), xpBar);
     }
     fui::ButtonProps again;
-    again.label = model.daily ? "BACK TO MODES"
+    again.label = model.daily                                ? "BACK TO MODES"
                   : game.result == terminalhack::Result::Won ? "NEXT LEVEL"
                                                              : "RETRY LEVEL";
     again.action = ActionAgain;
+    again.styles = toybox::rowStyles();
     screen.button(again, screen.takeBottom(toybox::kPillHeight, toybox::kGutter));
     return;
   }

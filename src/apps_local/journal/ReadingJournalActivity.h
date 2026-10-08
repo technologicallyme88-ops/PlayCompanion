@@ -21,6 +21,7 @@ class ReadingJournalActivity final : public Activity {
  private:
   enum class View : uint8_t { Calendar, List, Stats, Summary, DateEditor };
   void stepMonth(int delta);
+  void stepCalendarDay(int delta);
   void selectNext(int delta);
   void drawCalendar();
   void drawList();

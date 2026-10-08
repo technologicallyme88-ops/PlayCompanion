@@ -22,6 +22,8 @@ class FarmActivity final : public Activity {
   void goBack();
   void activate();
   void saveIfChanged(bool changed, const char* unchangedFeedback = nullptr);
+  bool inventoryItem(int index, uint8_t& cropId, uint8_t& branch) const;
+  int inventoryCount() const;
   int itemCount() const;
   int rowsPerPage() const;
   int firstVisible() const;

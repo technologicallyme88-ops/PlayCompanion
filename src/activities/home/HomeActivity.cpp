@@ -26,9 +26,9 @@
 #include <vector>
 
 #include "../../apps_local/Shelf.h"  // CrossPlay game/app shelf
+#include "../../apps_local/journal/FinishedBookActions.h"
 #include "../../apps_local/journal/ReadingJournal.h"
 #include "../../apps_local/journal/ReadingJournalActivity.h"
-#include "../../apps_local/journal/FinishedBookActions.h"
 #include "CrossPointSettings.h"
 #include "CrossPointState.h"
 #include "MappedInputManager.h"
@@ -36,6 +36,7 @@
 #include "RecentBooksStore.h"
 #include "activities/util/ConfirmationActivity.h"
 #include "apps_local/farm/FarmActivity.h"
+#include "apps_local/farm/FarmAssets.h"
 #include "apps_local/farm/FarmState.h"
 #include "companion/CompanionRenderer.h"
 #include "companion/CompanionState.h"
@@ -280,8 +281,7 @@ void HomeActivity::onEnter() {
   Activity::onEnter();
 
   const bool farmLoaded = FARM_STATE.initializeFromFile();
-  Storage.mkdir("/.crosspoint/harvest");
-  Storage.mkdir("/.crosspoint/harvest/crops");
+  farm::ensureCropAssets();
   if (farmLoaded && FARM_STATE.refreshForToday() && !FARM_STATE.saveToFile()) {
     LOG_ERR("FARM", "Failed to save daily update");
   }
@@ -1286,8 +1286,11 @@ void HomeActivity::render(RenderLock&&) {
   }
 #if defined(CROSSINK_ENABLE_POKEMON) || defined(CROSSINK_SIM_POKEMON_HOME_TILE)
   if (pokemonRect.width > 0) {
-    companionRegion.x = pokemonRect.x;
-    companionRegion.width = pokemonRect.width;
+    // Centre the companion on the visible Pokémon tile, not on the wider
+    // outer rect handed to Lyra. The outer rect deliberately extends left by
+    // one padding width, which shifted the entire companion column on X3/X4.
+    companionRegion.x = pokemonRect.x + metrics.contentSidePadding;
+    companionRegion.width = std::max(0, pageWidth - metrics.contentSidePadding - companionRegion.x);
   }
 #endif
 #if defined(CROSSINK_ENABLE_POKEMON) || defined(HOME_EXP_PREVIEW)

@@ -169,6 +169,22 @@ void ReadingJournalActivity::stepMonth(const int delta) {
   }
 }
 
+void ReadingJournalActivity::stepCalendarDay(const int delta) {
+  int day = calendarSelectedDate != 0 ? static_cast<int>(calendarSelectedDate % 100) : 1;
+  day += delta;
+  while (day < 1) {
+    stepMonth(-1);
+    day += journal::daysInMonth(year, month);
+  }
+  while (day > journal::daysInMonth(year, month)) {
+    day -= journal::daysInMonth(year, month);
+    stepMonth(1);
+  }
+  calendarSelectedDate = static_cast<uint32_t>(year * 10000 + month * 100 + day);
+  const int match = firstEntryForDate(calendarSelectedDate);
+  if (match >= 0) selected = match;
+}
+
 bool ReadingJournalActivity::entryMatchesDate(const int index, const uint32_t date) const {
   if (index < 0 || index >= count || date == 0) return false;
   const auto& entry = entries[index];
@@ -329,6 +345,27 @@ void ReadingJournalActivity::loop() {
         }
       }
     }
+    if (!mappedInput.hasTouch()) {
+      if (mappedInput.wasReleased(MappedInputManager::Button::Left)) {
+        view = View::Stats;
+      } else if (mappedInput.wasReleased(MappedInputManager::Button::Right)) {
+        view = View::List;
+      } else if (mappedInput.wasReleased(MappedInputManager::Button::PageBack)) {
+        stepCalendarDay(-1);
+      } else if (mappedInput.wasReleased(MappedInputManager::Button::PageForward)) {
+        stepCalendarDay(1);
+      } else if (mappedInput.wasReleased(MappedInputManager::Button::Confirm)) {
+        const int match = firstEntryForDate(calendarSelectedDate);
+        if (match < 0) return;
+        selected = match;
+        summaryField = 0;
+        view = View::Summary;
+      } else {
+        return;
+      }
+      requestUpdate();
+      return;
+    }
     const auto swipe = mappedInput.wasSwipe();
     if (swipe == MappedInputManager::SwipeDir::Left)
       stepMonth(1);
@@ -353,6 +390,26 @@ void ReadingJournalActivity::loop() {
     } else
       return;
   } else if (view == View::List) {
+    if (!mappedInput.hasTouch()) {
+      if (mappedInput.wasReleased(MappedInputManager::Button::Left)) {
+        view = View::Calendar;
+      } else if (mappedInput.wasReleased(MappedInputManager::Button::Right)) {
+        view = View::Stats;
+      } else if (mappedInput.wasReleased(MappedInputManager::Button::PageBack)) {
+        listOffset = std::max(0, listOffset - 1);
+        selected = count > 0 ? count - 1 - listOffset : -1;
+      } else if (mappedInput.wasReleased(MappedInputManager::Button::PageForward)) {
+        listOffset = std::min(std::max(0, count - 1), listOffset + 1);
+        selected = count > 0 ? count - 1 - listOffset : -1;
+      } else if (mappedInput.wasReleased(MappedInputManager::Button::Confirm) && selected >= 0) {
+        summaryField = 0;
+        view = View::Summary;
+      } else {
+        return;
+      }
+      requestUpdate();
+      return;
+    }
     int tapX = 0;
     int tapY = 0;
     if (mappedInput.wasScreenTapped(tapX, tapY)) {
@@ -377,6 +434,16 @@ void ReadingJournalActivity::loop() {
       return;
     }
   } else if (view == View::Stats) {
+    if (!mappedInput.hasTouch()) {
+      if (mappedInput.wasReleased(MappedInputManager::Button::Left))
+        view = View::List;
+      else if (mappedInput.wasReleased(MappedInputManager::Button::Right))
+        view = View::Calendar;
+      else
+        return;
+      requestUpdate();
+      return;
+    }
     int tapX = 0;
     int tapY = 0;
     if (!mappedInput.wasScreenTapped(tapX, tapY) || !handleViewTabTap(tapX, tapY)) return;
@@ -555,7 +622,7 @@ void ReadingJournalActivity::drawCalendar() {
     UITheme::drawCenteredText(renderer, Rect{side, cardY, sw - side * 2, 80}, UI_12_FONT_ID, cardY,
                               count == 0 ? "OPEN A BOOK TO BEGIN YOUR JOURNAL" : "NO READING ON THIS DAY");
   }
-  const auto labels = mappedInput.mapLabels("Back", "Summary", "Books", "Month");
+  const auto labels = mappedInput.mapLabels("Back", "Summary", "Stats", "List");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
@@ -591,7 +658,7 @@ void ReadingJournalActivity::drawList() {
     }
     constexpr int TILE_H = 68;
     if (y + TILE_H > sh - metrics.buttonHintsHeight) break;
-    renderer.drawRoundedRect(side, y, sw - side * 2, TILE_H - 8, 8, 1, true);
+    renderer.drawRoundedRect(side, y, sw - side * 2, TILE_H - 8, 8, index == selected ? 2 : 1, true);
     if (listVisibleCount < kMaxVisibleListTiles) {
       listTileRects[listVisibleCount] = Rect{side, y, sw - side * 2, TILE_H - 8};
       listTileEntries[listVisibleCount] = index;
@@ -605,7 +672,7 @@ void ReadingJournalActivity::drawList() {
   if (count == 0)
     UITheme::drawCenteredText(renderer, Rect{side, y + 40, sw - side * 2, 80}, UI_12_FONT_ID, y + 60,
                               "OPEN A BOOK TO BEGIN YOUR JOURNAL");
-  const auto labels = mappedInput.mapLabels("Back", "", "Scroll", "");
+  const auto labels = mappedInput.mapLabels("Back", "Open", "Calendar", "Stats");
   GUI.drawButtonHints(renderer, labels.btn1, labels.btn2, labels.btn3, labels.btn4);
 }
 
@@ -638,16 +705,12 @@ void ReadingJournalActivity::drawStats() {
   for (int i = 0; i < 6; ++i) {
     const int x = side + (i % 3) * cardW;
     const int y = cardsY + (i / 3) * 74;
-    UITheme::drawCenteredText(renderer, Rect{x, y, cardW, 28}, UI_12_FONT_ID, y, values[i], true,
-                              EpdFontFamily::BOLD);
+    UITheme::drawCenteredText(renderer, Rect{x, y, cardW, 28}, UI_12_FONT_ID, y, values[i], true, EpdFontFamily::BOLD);
     if (labelLine2[i][0] == '\0') {
-      UITheme::drawCenteredText(renderer, Rect{x + 4, y + 34, cardW - 8, 24}, UI_10_FONT_ID, y + 34,
-                                labelLine1[i]);
+      UITheme::drawCenteredText(renderer, Rect{x + 4, y + 34, cardW - 8, 24}, UI_10_FONT_ID, y + 34, labelLine1[i]);
     } else {
-      UITheme::drawCenteredText(renderer, Rect{x + 4, y + 27, cardW - 8, 24}, UI_10_FONT_ID, y + 27,
-                                labelLine1[i]);
-      UITheme::drawCenteredText(renderer, Rect{x + 4, y + 49, cardW - 8, 24}, UI_10_FONT_ID, y + 49,
-                                labelLine2[i]);
+      UITheme::drawCenteredText(renderer, Rect{x + 4, y + 27, cardW - 8, 24}, UI_10_FONT_ID, y + 27, labelLine1[i]);
+      UITheme::drawCenteredText(renderer, Rect{x + 4, y + 49, cardW - 8, 24}, UI_10_FONT_ID, y + 49, labelLine2[i]);
     }
   }
 
@@ -674,7 +737,7 @@ void ReadingJournalActivity::drawStats() {
   const int timeY = cardsY + 165;
   drawBars(timeY, "TIME OF DAY", timeNames, stats.timeOfDaySeconds, 4);
   drawBars(timeY + 174, "DAY OF WEEK", dayNames, stats.dayOfWeekSeconds, 7);
-  const auto hints = mappedInput.mapLabels("Back", "", "", "");
+  const auto hints = mappedInput.mapLabels("Back", "", "List", "Calendar");
   GUI.drawButtonHints(renderer, hints.btn1, hints.btn2, hints.btn3, hints.btn4);
 }
 

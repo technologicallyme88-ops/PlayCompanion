@@ -68,6 +68,7 @@ class FarmState : public PersistableStore<FarmState> {
   bool buyNextPlot();
   bool harvestAll();
   bool sellAll();
+  bool sellOne(uint8_t cropId, CropBranch branch);
   bool careForPlot(CareAction action, uint8_t plotIndex = 0);
   bool claimQuest(uint8_t index);
   bool refillWater();

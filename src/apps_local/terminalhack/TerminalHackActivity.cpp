@@ -1,15 +1,15 @@
 #include "TerminalHackActivity.h"
 
-#include <Memory.h>
 #include <CompanionMood.h>
 #include <HalClock.h>
 #include <Logging.h>
+#include <Memory.h>
 
-#include "CrossPointSettings.h"
 #include "../Shelf.h"
 #include "../ui/Toybox.h"
 #include "../ui/ToyboxFonts.h"
 #include "../ui/ToyboxTheme.h"
+#include "CrossPointSettings.h"
 #include "TerminalHackScreens.h"
 #include "TerminalHackStats.h"
 
@@ -20,8 +20,7 @@ std::unique_ptr<Activity> TerminalHackActivity::create(GfxRenderer& renderer, Ma
 void TerminalHackActivity::startGame(const bool daily, const terminalhack::Difficulty difficulty) {
   dailyMode = daily;
   regularRewardRecorded = false;
-  const uint32_t seed = daily ? terminalhack::dailySeed(dailyDay)
-                              : static_cast<uint32_t>(millis()) * 2654435761u + 1u;
+  const uint32_t seed = daily ? terminalhack::dailySeed(dailyDay) : static_cast<uint32_t>(millis()) * 2654435761u + 1u;
   if (daily) {
     terminalhack::start(game, seed, 6);
   } else {
@@ -51,8 +50,8 @@ void TerminalHackActivity::finishRegular() {
   if (dailyMode || game.result == terminalhack::Result::Playing || regularRewardRecorded) return;
   regularRewardRecorded = true;
   const bool won = game.result == terminalhack::Result::Won;
-  const uint16_t xp = won ? terminalhack::xpForWin(game.difficulty, game.attempts)
-                          : terminalhack::xpForLoss(game.difficulty);
+  const uint16_t xp =
+      won ? terminalhack::xpForWin(game.difficulty, game.attempts) : terminalhack::xpForLoss(game.difficulty);
   game.xpDelta = TERMINAL_HACK_STATS.recordLevelResult(game.difficulty, won, xp);
   level = static_cast<uint16_t>(TERMINAL_HACK_STATS.winsFor(game.difficulty) + 1);
 }
@@ -71,8 +70,7 @@ bool TerminalHackActivity::refreshDailyDay() {
   if (!halClock.getUtcDateTime(year, month, day, hour, minute)) return false;
   uint8_t biasedOffset = SETTINGS.clockUtcOffsetQ;
   if (biasedOffset > 104) biasedOffset = 104;
-  dailyDay = companion::localDayNumber(year, month, day, hour, minute,
-                                        static_cast<int32_t>(biasedOffset) - 48);
+  dailyDay = companion::localDayNumber(year, month, day, hour, minute, static_cast<int32_t>(biasedOffset) - 48);
   return true;
 }
 
@@ -85,7 +83,7 @@ void TerminalHackActivity::onEnter() {
   refreshDailyDay();
   if (TERMINAL_HACK_STATS.restoreRun(game, dailyMode, gridPage)) {
     view = View::Board;
-    notice = game.result == terminalhack::Result::Won       ? "EXACT MATCH"
+    notice = game.result == terminalhack::Result::Won      ? "EXACT MATCH"
              : game.result == terminalhack::Result::Locked ? "ENTRY DENIED"
              : game.guessCount > 0                         ? "ENTRY DENIED"
                                                            : "SELECT PASSWORD";
@@ -111,10 +109,10 @@ void TerminalHackActivity::loop() {
   if (view == View::Board && game.result == terminalhack::Result::Playing) {
     const uint8_t pageCount = static_cast<uint8_t>((game.candidateCount + 11) / 12);
     const auto swipe = mappedInput.wasSwipe();
-    const bool pageDown = swipe == MappedInputManager::SwipeDir::Up ||
-                          mappedInput.wasReleased(MappedInputManager::Button::Down);
-    const bool pageUp = swipe == MappedInputManager::SwipeDir::Down ||
-                        mappedInput.wasReleased(MappedInputManager::Button::Up);
+    const bool pageDown =
+        swipe == MappedInputManager::SwipeDir::Up || mappedInput.wasReleased(MappedInputManager::Button::Down);
+    const bool pageUp =
+        swipe == MappedInputManager::SwipeDir::Down || mappedInput.wasReleased(MappedInputManager::Button::Up);
     if (pageDown && gridPage + 1 < pageCount) {
       ++gridPage;
       persistRun();
@@ -138,12 +136,12 @@ void TerminalHackActivity::loop() {
     input.touchY = static_cast<int16_t>(y);
   }
   if (!mappedInput.hasTouch()) {
-    const bool pagedBoard = view == View::Board && game.result == terminalhack::Result::Playing &&
-                            game.candidateCount > 12;
-    input.focusNext = mappedInput.wasReleased(pagedBoard ? MappedInputManager::Button::Right
-                                                        : MappedInputManager::Button::NavNext);
+    const bool pagedBoard =
+        view == View::Board && game.result == terminalhack::Result::Playing && game.candidateCount > 12;
+    input.focusNext =
+        mappedInput.wasReleased(pagedBoard ? MappedInputManager::Button::Right : MappedInputManager::Button::NavNext);
     input.focusPrev = mappedInput.wasReleased(pagedBoard ? MappedInputManager::Button::Left
-                                                        : MappedInputManager::Button::NavPrevious);
+                                                         : MappedInputManager::Button::NavPrevious);
     input.confirm = mappedInput.wasReleased(MappedInputManager::Button::Confirm);
   }
   if ((!input.touchReleased && !input.focusNext && !input.focusPrev && !input.confirm) || !interactionsReady) return;
@@ -156,6 +154,7 @@ void TerminalHackActivity::loop() {
       notice = game.result == terminalhack::Result::Won ? "EXACT MATCH" : "ENTRY DENIED";
       finishDaily();
       finishRegular();
+      if (game.result != terminalhack::Result::Playing) interactions.setFocusedIndex(0);
       persistRun();
       requestUpdate();
     }
@@ -217,6 +216,11 @@ void TerminalHackActivity::render(RenderLock&&) {
   }
   terminalhackui::buildBoard(screen, model);
   toybox::reportOverflow(interactions, "Terminal Hack");
+  const bool seedButtonFocus =
+      !mappedInput.hasTouch() && interactions.count() > 0 &&
+      (interactions.focusedIndex() < 0 || interactions.focusedIndex() >= static_cast<int16_t>(interactions.count()));
+  if (seedButtonFocus) interactions.setFocusedIndex(0);
   interactionsReady = true;
   renderer.displayBuffer();
+  if (seedButtonFocus) requestUpdate();
 }

@@ -115,9 +115,14 @@ bool ReaderActivity::pageTurnTracked(const bool isForward) {
   const bool turned = pageTurn(isForward);
   if (turned) {
     COMPANION.onPageTurn();
-    journal::notePageTurn();
-    FARM_STATE.onPageTurn();
-    farmSessionPages++;
+    // Reading totals and farm quests represent forward progress through a book.
+    // Revisiting an earlier page is still a real reader navigation, but it must
+    // not earn another journal page or quest page.
+    if (isForward) {
+      journal::notePageTurn();
+      FARM_STATE.onPageTurn();
+      farmSessionPages++;
+    }
     if (isForward && isAtEndOfBook() && !farmFinishRecorded) {
       FARM_STATE.onBookFinished();
       farmFinishRecorded = true;
@@ -132,9 +137,6 @@ bool ReaderActivity::skipPagesTracked(const int amount) {
   // counts as one navigation event rather than pretending ten pages were read.
   if (turned) {
     COMPANION.onPageTurn();
-    journal::notePageTurn();
-    FARM_STATE.onPageTurn();
-    farmSessionPages++;
   }
   return turned;
 }

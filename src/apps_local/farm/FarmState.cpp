@@ -162,9 +162,8 @@ bool FarmState::fromJson(const JsonVariantConst doc) {
   lastVitalMinute = doc["lastVitalMinute"] | 0;
   lastWeatherMinute = doc["lastWeatherMinute"] | 0;
   const uint8_t savedWeather = doc["weatherEffect"] | static_cast<uint8_t>(WeatherEffect::Clear);
-  currentWeather = savedWeather <= static_cast<uint8_t>(WeatherEffect::Snow)
-                       ? static_cast<WeatherEffect>(savedWeather)
-                       : WeatherEffect::Clear;
+  currentWeather = savedWeather <= static_cast<uint8_t>(WeatherEffect::Snow) ? static_cast<WeatherEffect>(savedWeather)
+                                                                             : WeatherEffect::Clear;
 
   plots = {};
   int plotIndex = 0;
@@ -292,7 +291,8 @@ bool FarmState::refreshForToday() {
     lastLocalDay = localDay;
     changed = true;
   }
-  const int32_t utcMinute = companion::localDayNumber(year, month, dayOfMonth, hour, minute, 0) * 1440 + hour * 60 + minute;
+  const int32_t utcMinute =
+      companion::localDayNumber(year, month, dayOfMonth, hour, minute, 0) * 1440 + hour * 60 + minute;
   if (lastVitalMinute <= 0 || utcMinute < lastVitalMinute) {
     lastVitalMinute = utcMinute;
     return true;
@@ -410,6 +410,19 @@ bool FarmState::sellAll() {
   return changed;
 }
 
+bool FarmState::sellOne(const uint8_t cropId, const CropBranch branch) {
+  if (cropId == 0 || cropId > CROP_COUNT) return false;
+  const uint8_t branchIndex = static_cast<uint8_t>(branch);
+  if (branchIndex >= 3 || harvested[cropId - 1][branchIndex] == 0) return false;
+
+  const uint16_t value = branchSellPrice(cropId, branch);
+  coins = static_cast<uint16_t>(std::min<uint32_t>(UINT16_MAX, coins + value));
+  --harvested[cropId - 1][branchIndex];
+  sold[cropId - 1][branchIndex] =
+      static_cast<uint16_t>(std::min<uint32_t>(UINT16_MAX, sold[cropId - 1][branchIndex] + 1));
+  return true;
+}
+
 bool FarmState::careForPlot(const CareAction action, const uint8_t plotIndex) {
   if (plotIndex >= ownedPlotCount || plots[plotIndex].cropId == 0 || plots[plotIndex].withered) return false;
   Plot* target = &plots[plotIndex];
@@ -483,7 +496,7 @@ void FarmState::onPageTurn() {
     const int localMinutes = static_cast<int>(hour) * 60 + minute + signedUtcOffsetQuarterHours() * 15;
     const int normalizedLocalMinutes = ((localMinutes % 1440) + 1440) % 1440;
     const int localHour = normalizedLocalMinutes / 60;
-    nightReading = localHour >= 23 || localHour < 6;
+    nightReading = localHour >= 20 || localHour < 6;
   }
   pagesToday = std::min<uint16_t>(UINT16_MAX, pagesToday + 1);
   if (nightReading) nightPages = static_cast<uint16_t>(std::min<uint32_t>(UINT16_MAX, nightPages + 1U));
