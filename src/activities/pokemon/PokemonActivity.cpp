@@ -265,6 +265,13 @@ void PokemonActivity::finishStarter(const char* nickname) {
   setScreen(Screen::Menu);
 }
 
+void PokemonActivity::finishCaughtNicknamePrompt() {
+  if (!refreshSnapshot()) return;
+  const Screen next = pokemon::pendingEventFront(snapshot_.state) == nullptr ? Screen::Menu : Screen::Event;
+  setScreen(next);
+  nicknamePrompt_ = {};
+}
+
 void PokemonActivity::openNickname(const uint32_t recordId, const bool starter, const Screen cancelScreen) {
   auto keyboard = makeUniqueNoThrow<KeyboardEntryActivity>(renderer, mappedInput, tr(STR_POKEMON_NICKNAME), "", 32,
                                                            InputType::Text);
@@ -283,9 +290,7 @@ void PokemonActivity::openNickname(const uint32_t recordId, const bool starter, 
     if (starter) {
       finishStarter(keyboardResult->text.c_str());
     } else if (service_.renamePokemon(recordId, keyboardResult->text) == pokemon::ServiceStatus::Ok) {
-      if (!refreshSnapshot()) return;
-      nicknamePrompt_ = {};
-      setScreen(pokemon::pendingEventFront(snapshot_.state) == nullptr ? Screen::Menu : Screen::Event);
+      finishCaughtNicknamePrompt();
     } else {
       showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Menu);
     }
@@ -310,8 +315,7 @@ void PokemonActivity::activate() {
       } else if (nicknamePrompt_.isStarter())
         finishStarter("");
       else {
-        nicknamePrompt_ = {};
-        setScreen(pokemon::pendingEventFront(snapshot_.state) == nullptr ? Screen::Menu : Screen::Event);
+        finishCaughtNicknamePrompt();
       }
       return;
     case Screen::Menu:
@@ -475,8 +479,9 @@ void PokemonActivity::activate() {
           showMessage(tr(STR_POKEMON_SAVE_ERROR), Screen::Event);
           return;
         }
-        if (!refreshSnapshot()) return;
         if (caught != 0) {
+          // Keep the encounter snapshot intact until the nickname screen owns
+          // the next render; a queued render may still be consuming it.
           pokemon::PokemonRecord caughtRecord{};
           if (service_.readRecord(caught, caughtRecord) != pokemon::ServiceStatus::Ok ||
               pokemon::speciesData(caughtRecord.speciesId) == nullptr) {
@@ -488,6 +493,7 @@ void PokemonActivity::activate() {
           snprintf(message_, sizeof(message_), tr(STR_POKEMON_NICKNAME_QUESTION), speciesName(caughtRecord.speciesId));
           setScreen(Screen::NicknameQuestion);
         } else {
+          if (!refreshSnapshot()) return;
           setScreen(pokemon::pendingEventFront(snapshot_.state) == nullptr ? Screen::Menu : Screen::Event);
         }
       } else if (pending.kind == pokemon::PendingEventKind::Item) {
@@ -542,8 +548,7 @@ void PokemonActivity::goBack() {
       if (nicknamePrompt_.isStarter())
         setScreen(Screen::Gender);
       else {
-        nicknamePrompt_ = {};
-        setScreen(pokemon::pendingEventFront(snapshot_.state) == nullptr ? Screen::Menu : Screen::Event);
+        finishCaughtNicknamePrompt();
       }
       return;
     case Screen::Summary:
@@ -689,10 +694,11 @@ void PokemonActivity::loop() {
       int row = -1;
       const auto touch = mappedInput.rowTouch(row, listBounds_.y, rowHeight_, rowCount_, listBounds_.x,
                                               listBounds_.x + listBounds_.width, rowHeight_);
-      if ((touch == MappedInputManager::RowTouch::Down || touch == MappedInputManager::RowTouch::Tap) &&
-          row == 0) {
-        if (touch == MappedInputManager::RowTouch::Tap) activate();
-        else requestUpdate();
+      if ((touch == MappedInputManager::RowTouch::Down || touch == MappedInputManager::RowTouch::Tap) && row == 0) {
+        if (touch == MappedInputManager::RowTouch::Tap)
+          activate();
+        else
+          requestUpdate();
         return;
       }
     }

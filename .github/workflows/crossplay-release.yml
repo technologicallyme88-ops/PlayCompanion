@@ -110,26 +110,27 @@ jobs:
           # new in CrossPlay". A release note is a thing you write.
           generate_release_notes: false
           body: |
-            ## Reading and quests
+            ## Pokémon and sync
 
-            - Page totals and reading quests now count forward reading only; backward
-              turns and multi-page skips no longer inflate progress.
-            - Night Owl begins at 8 PM and the care-help values match the actual effects.
-            - X3/X4 button navigation can select calendar dates and open Journal list,
-              stats, and book-summary views.
+            - Catch-to-nickname navigation keeps the encounter snapshot valid, removing
+              the stray placeholder screen between catching and naming a Pokémon.
+            - KOReader Sync now asks the user to resolve near-equal percentages when the
+              local and remote content positions are actually different.
+
+            ## Reading journal
+
+            - Work Reading counts Wednesday night every other week, beginning with the
+              Sunday, October 4, 2026 work week; Sunday through Tuesday remain weekly.
 
             ## Farm
 
-            - Crop artwork is installed from firmware when the SD card lacks the current assets.
-            - Harvest and single-crop sale feedback identify the completed action and crop quality.
-            - The sell screen shows a live coin balance and selectable inventory entries.
-
-            ## X3/X4 controls and layout
-
-            - The home companion column is centered correctly on non-Pro displays.
-            - Terminal Hack exposes visible button focus and selectable post-level actions.
-            - Dungeon Run supports hardware-button focus, keeps room statistics on-screen,
-              and replaces the touch-pointer-only controls.
+            - The farm overview explains each live weather modifier and shows the current
+              reading streak instead of water and fertilizer stock.
+            - Seed purchases no longer appear as bag inventory because purchased seeds are
+              planted immediately.
+            - Harvest Crops now acts directly from the main farm menu and reports the result
+              at the bottom of the page.
+            - The Shop header shows the current coin balance.
 
             - X3, X4, and X4 Pro production images are built from the same release.
 

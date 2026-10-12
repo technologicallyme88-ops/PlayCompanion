@@ -1,13 +1,11 @@
 #include "ReadingJournal.h"
 
-#include <HalStorage.h>
+#include <Arduino.h>
+#include <CompanionMood.h>
 #include <HalClock.h>
+#include <HalStorage.h>
 #include <Logging.h>
 #include <Memory.h>
-#include <CompanionMood.h>
-#include <Arduino.h>
-
-#include "CrossPointSettings.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -15,14 +13,16 @@
 #include <ctime>
 #include <iterator>
 
+#include "CrossPointSettings.h"
+
 namespace journal {
 namespace {
 
 constexpr char kPath[] = "/.crosspoint/reading-journal.bin";
 constexpr char kStatsPath[] = "/.crosspoint/reading-stats.bin";
 constexpr char kStatsTmpPath[] = "/.crosspoint/reading-stats.bin.tmp";
-constexpr uint32_t kMagic = 0x314A5243;  // CRJ1
-constexpr uint32_t kStatsMagic = 0x31535243;  // CRS1
+constexpr uint32_t kMagic = 0x314A5243;                // CRJ1
+constexpr uint32_t kStatsMagic = 0x31535243;           // CRS1
 constexpr uint32_t kEarliestValidEpoch = 1577836800u;  // 2020-01-01
 
 struct Header {
@@ -118,18 +118,31 @@ uint32_t saturatedAdd(const uint32_t lhs, const uint32_t rhs) {
   return UINT32_MAX - lhs < rhs ? UINT32_MAX : lhs + rhs;
 }
 
-constexpr bool isWorkReadingTime(const uint8_t weekday, const uint8_t hour) {
-  return (hour >= 18 && weekday <= 3) || (hour < 6 && weekday >= 1 && weekday <= 4);
+constexpr int32_t kAlternatingWednesdayAnchorSunday = 20730;  // 2026-10-04
+
+constexpr bool countsWednesdayForWorkReading(const int32_t localDay, const uint8_t weekday) {
+  const int32_t weekStart = localDay - weekday;
+  const int32_t weeksFromAnchor = (weekStart - kAlternatingWednesdayAnchorSunday) / 7;
+  return ((weeksFromAnchor % 2) + 2) % 2 == 0;
 }
 
-static_assert(isWorkReadingTime(0, 18));  // Sunday evening
-static_assert(isWorkReadingTime(4, 5));   // Thursday morning
-static_assert(!isWorkReadingTime(4, 18));
-static_assert(!isWorkReadingTime(0, 5));
-
-int signedUtcOffsetQuarterHours() {
-  return std::clamp(static_cast<int>(SETTINGS.clockUtcOffsetQ), 0, 104) - 48;
+constexpr bool isWorkReadingTime(const int32_t localDay, const uint8_t weekday, const uint8_t hour) {
+  if (hour >= 18 && weekday <= 2) return true;
+  if (hour < 6 && weekday >= 1 && weekday <= 3) return true;
+  if (!countsWednesdayForWorkReading(localDay, weekday)) return false;
+  return (weekday == 3 && hour >= 18) || (weekday == 4 && hour < 6);
 }
+
+static_assert(isWorkReadingTime(20730, 0, 18));   // Counted Sunday evening
+static_assert(isWorkReadingTime(20733, 3, 18));   // Counted Wednesday evening
+static_assert(isWorkReadingTime(20734, 4, 5));    // Counted Thursday morning
+static_assert(isWorkReadingTime(20739, 2, 18));   // Tuesday always counts
+static_assert(!isWorkReadingTime(20740, 3, 18));  // Alternate Wednesday evening
+static_assert(!isWorkReadingTime(20741, 4, 5));   // Alternate Thursday morning
+static_assert(!isWorkReadingTime(20734, 4, 18));
+static_assert(!isWorkReadingTime(20730, 0, 5));
+
+int signedUtcOffsetQuarterHours() { return std::clamp(static_cast<int>(SETTINGS.clockUtcOffsetQ), 0, 104) - 48; }
 
 bool readLocalTime(int32_t& localDay, uint8_t& localHour, uint8_t& weekday) {
   uint16_t year = 0;
@@ -248,8 +261,8 @@ bool save(const Entry* entries, const int count) {
   }
   const Header header{kMagic, static_cast<uint16_t>(count), static_cast<uint16_t>(sizeof(Entry))};
   if (file.write(&header, sizeof(header)) != sizeof(header) ||
-      (count > 0 && file.write(entries, static_cast<size_t>(count) * sizeof(Entry)) !=
-                        static_cast<size_t>(count) * sizeof(Entry))) {
+      (count > 0 &&
+       file.write(entries, static_cast<size_t>(count) * sizeof(Entry)) != static_cast<size_t>(count) * sizeof(Entry))) {
     LOG_ERR("JRNL", "Could not write journal");
     return false;
   }
@@ -436,7 +449,7 @@ void tickReadingSession() {
   int32_t localDay = companion::DayLedger::NEVER;
   uint8_t localHour = 0;
   uint8_t weekday = 0;
-  if (readLocalTime(localDay, localHour, weekday) && isWorkReadingTime(weekday, localHour))
+  if (readLocalTime(localDay, localHour, weekday) && isWorkReadingTime(localDay, weekday, localHour))
     activeSession.workReadingSeconds = saturatedAdd(activeSession.workReadingSeconds, credited - before);
 }
 
@@ -446,7 +459,7 @@ void endReadingSession() {
   const uint32_t pages = activeSession.pageTurns;
   const uint32_t seconds = saturatedAdd(activeSession.accumulator.creditedSeconds(), activeSession.openingSeconds);
   const bool openingAtWork = activeSession.localDay != companion::DayLedger::NEVER &&
-                             isWorkReadingTime(activeSession.weekday, activeSession.localHour);
+                             isWorkReadingTime(activeSession.localDay, activeSession.weekday, activeSession.localHour);
   const uint32_t workSeconds =
       saturatedAdd(activeSession.workReadingSeconds, openingAtWork ? activeSession.openingSeconds : 0);
   activeSession.active = false;
@@ -487,8 +500,8 @@ void endReadingSession() {
       if (std::strncmp(entries[i].path, activeSession.path, kPathBytes) != 0) continue;
       entries[i].readingSeconds = saturatedAdd(entries[i].readingSeconds, seconds);
       entries[i].workReadingSeconds = saturatedAdd(entries[i].workReadingSeconds, workSeconds);
-      entries[i].readingSessions = static_cast<uint16_t>(
-          std::min<uint32_t>(UINT16_MAX, static_cast<uint32_t>(entries[i].readingSessions) + 1));
+      entries[i].readingSessions =
+          static_cast<uint16_t>(std::min<uint32_t>(UINT16_MAX, static_cast<uint32_t>(entries[i].readingSessions) + 1));
       entries[i].pageTurns = saturatedAdd(entries[i].pageTurns, pages);
       const uint32_t readDate = today();
       if (readDate != 0 && readDate != entries[i].lastReadDate && entries[i].readingDays < UINT16_MAX)
@@ -503,8 +516,8 @@ void endReadingSession() {
 
 bool setDateField(const char* path, const uint32_t date, const bool finish) {
   if (!path || !*path) return false;
-  const uint32_t epoch = epochForDate(static_cast<int>(date / 10000), static_cast<int>((date / 100) % 100),
-                                      static_cast<int>(date % 100));
+  const uint32_t epoch =
+      epochForDate(static_cast<int>(date / 10000), static_cast<int>((date / 100) % 100), static_cast<int>(date % 100));
   if (epoch == 0) return false;
   auto entries = makeUniqueNoThrow<Entry[]>(kMaxEntries);
   if (!entries) {
@@ -565,7 +578,7 @@ bool updatePath(const char* oldPath, const char* newPath) {
 uint32_t dateKey(const uint32_t epoch) {
   if (epoch < kEarliestValidEpoch) return 0;
   const time_t raw = static_cast<time_t>(epoch);
-  struct tm parts {};
+  struct tm parts{};
   localtime_r(&raw, &parts);
   return static_cast<uint32_t>((parts.tm_year + 1900) * 10000 + (parts.tm_mon + 1) * 100 + parts.tm_mday);
 }

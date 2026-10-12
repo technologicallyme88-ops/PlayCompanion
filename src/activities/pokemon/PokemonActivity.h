@@ -55,6 +55,7 @@ class PokemonActivity final : public Activity {
   void activate();
   void goBack();
   void openNickname(uint32_t recordId, bool starter, Screen cancelScreen);
+  void finishCaughtNicknamePrompt();
   void finishStarter(const char* nickname);
   void showMessage(const char* message, Screen returnScreen);
   void buildUi(freeink::ui::FreeInkApp<24, 8>::ScreenType& screen);

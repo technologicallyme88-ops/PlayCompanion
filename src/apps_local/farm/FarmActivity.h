@@ -16,7 +16,7 @@ class FarmActivity final : public Activity {
   void render(RenderLock&&) override;
 
  private:
-  enum class Screen : uint8_t { Menu, Seeds, Harvest, Sell, Care, Shop, Quests, Herbarium, HerbDetail };
+  enum class Screen : uint8_t { Menu, Seeds, Sell, Care, Shop, Quests, Herbarium, HerbDetail };
 
   void setScreen(Screen screen, int selection = 0);
   void goBack();

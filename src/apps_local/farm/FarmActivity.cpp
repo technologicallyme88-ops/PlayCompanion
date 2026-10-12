@@ -96,8 +96,6 @@ int FarmActivity::itemCount() const {
       return 7;
     case Screen::Seeds:
       return 2;
-    case Screen::Harvest:
-      return 1;
     case Screen::Sell:
       return inventoryCount();
     case Screen::Care:
@@ -123,8 +121,6 @@ const char* FarmActivity::title() const {
       return tr(STR_FARM);
     case Screen::Seeds:
       return tr(STR_FARM_BUY_SEEDS);
-    case Screen::Harvest:
-      return tr(STR_FARM_HARVEST);
     case Screen::Sell:
       return "Bag";
     case Screen::Care:
@@ -186,8 +182,18 @@ bool FarmActivity::inventoryItem(const int index, uint8_t& cropId, uint8_t& bran
 void FarmActivity::activate() {
   switch (screen_) {
     case Screen::Menu: {
-      static constexpr Screen destinations[7] = {Screen::Seeds, Screen::Harvest, Screen::Sell,     Screen::Care,
-                                                 Screen::Shop,  Screen::Quests,  Screen::Herbarium};
+      if (selected_ == 1) {
+        if (FARM_STATE.harvestAll()) {
+          if (!FARM_STATE.saveToFile()) LOG_ERR("FARM", "Failed to save harvest");
+          snprintf(feedback_.data(), feedback_.size(), "%s", tr(STR_FARM_HARVEST_COMPLETED));
+          requestUpdate();
+        } else {
+          saveIfChanged(false, tr(STR_FARM_NOTHING_TO_HARVEST));
+        }
+        break;
+      }
+      static constexpr Screen destinations[7] = {Screen::Seeds, Screen::Menu,   Screen::Sell,     Screen::Care,
+                                                 Screen::Shop,  Screen::Quests, Screen::Herbarium};
       setScreen(destinations[selected_]);
       break;
     }
@@ -196,15 +202,6 @@ void FarmActivity::activate() {
       saveIfChanged(FARM_STATE.buySeedAndPlant(cropId));
       break;
     }
-    case Screen::Harvest:
-      if (FARM_STATE.harvestAll()) {
-        if (!FARM_STATE.saveToFile()) LOG_ERR("FARM", "Failed to save harvest");
-        snprintf(feedback_.data(), feedback_.size(), "Harvest completed.");
-        requestUpdate();
-      } else {
-        saveIfChanged(false, tr(STR_FARM_NOTHING_TO_HARVEST));
-      }
-      break;
     case Screen::Sell: {
       uint8_t cropId = 0;
       uint8_t branch = 0;
@@ -350,23 +347,21 @@ void FarmActivity::renderFarmOverview() {
   char line[96];
   snprintf(line, sizeof(line), "%s: %u", tr(STR_FARM_COINS), FARM_STATE.coinBalance());
   renderer.drawText(SMALL_FONT_ID, SIDE + 6, 78, line);
-  snprintf(line, sizeof(line), "%s: %u/3", tr(STR_FARM_WATER_STOCK), FARM_STATE.waterCharges());
+  snprintf(line, sizeof(line), "%s: %u", tr(STR_FARM_READING_STREAK), FARM_STATE.readingStreak());
   renderer.drawText(SMALL_FONT_ID, SIDE + 6, 100, line);
-  snprintf(line, sizeof(line), "%s: %u/3", tr(STR_FARM_FERTILIZER_STOCK), FARM_STATE.fertilizerCharges());
-  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 122, line);
-  renderer.drawLine(SIDE + 6, 148, 148, 148, 1, true);
+  renderer.drawLine(SIDE + 6, 126, 148, 126, 1, true);
   const Plot& plot = FARM_STATE.getPlots()[selectedPlot_];
   snprintf(line, sizeof(line), "%s %u", tr(STR_FARM_PLOT), selectedPlot_ + 1);
-  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 158, line, true, EpdFontFamily::BOLD);
+  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 136, line, true, EpdFontFamily::BOLD);
   const bool emptyPlot = plot.cropId == 0;
   snprintf(line, sizeof(line), emptyPlot ? "%s: -" : "%s: %u", tr(STR_FARM_MOISTURE), plot.moisture);
-  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 178, line);
+  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 156, line);
   snprintf(line, sizeof(line), emptyPlot ? "%s: -" : "%s: %u", tr(STR_FARM_LIGHT), plot.sunlight);
-  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 198, line);
+  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 176, line);
   snprintf(line, sizeof(line), emptyPlot ? "%s: -" : "%s: %u", tr(STR_FARM_HEALTH), plot.health);
-  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 218, line);
+  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 196, line);
   snprintf(line, sizeof(line), emptyPlot ? "%s: -" : "%s: %u", tr(STR_FARM_NUTRIENTS), plot.nutrients);
-  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 238, line);
+  renderer.drawText(SMALL_FONT_ID, SIDE + 6, 216, line);
 
   farmPreviewX_ = 174;
   farmPreviewY_ = 18;
@@ -401,16 +396,11 @@ void FarmActivity::renderList() {
         const uint8_t cropId = static_cast<uint8_t>(FARM_STATE.season() * 2 + i + 1);
         const auto& crop = FarmState::crop(cropId);
         snprintf(label, sizeof(label), "%s", I18N.get(CROP_NAMES[cropId - 1]));
-        snprintf(detail, sizeof(detail), "%s: %u %s  |  %s: %u %s  |  %s: %u", tr(STR_FARM_BUY_PRICE), crop.seedPrice,
-                 tr(STR_FARM_COIN), tr(STR_FARM_GROWTH_TIME), crop.growDays, tr(STR_FARM_DAYS),
-                 tr(STR_FARM_SEEDS_BOUGHT), FARM_STATE.seedsPurchased(cropId));
+        snprintf(detail, sizeof(detail), "%s: %u %s  |  %s: %u %s", tr(STR_FARM_BUY_PRICE), crop.seedPrice,
+                 tr(STR_FARM_COIN), tr(STR_FARM_GROWTH_TIME), crop.growDays, tr(STR_FARM_DAYS));
         enabled = FARM_STATE.coinBalance() >= crop.seedPrice;
         break;
       }
-      case Screen::Harvest:
-        snprintf(label, sizeof(label), "%s", tr(STR_FARM_HARVEST));
-        snprintf(detail, sizeof(detail), "%s", tr(STR_FARM_HARVEST_HELP));
-        break;
       case Screen::Sell: {
         uint8_t cropId = 0;
         uint8_t branch = 0;
@@ -592,7 +582,7 @@ void FarmActivity::render(RenderLock&&) {
     } else {
       char headerStatus[32];
       const char* subtitle = nullptr;
-      if (screen_ == Screen::Seeds || screen_ == Screen::Sell) {
+      if (screen_ == Screen::Seeds || screen_ == Screen::Sell || screen_ == Screen::Shop) {
         snprintf(headerStatus, sizeof(headerStatus), "%s: %u", tr(STR_FARM_COINS), FARM_STATE.coinBalance());
         subtitle = headerStatus;
       }
@@ -625,7 +615,18 @@ void FarmActivity::render(RenderLock&&) {
       }
     }
   }
-  if (feedback_[0]) renderer.drawText(SMALL_FONT_ID, SIDE, sh - FOOTER - 42, feedback_.data());
+  if (feedback_[0]) {
+    renderer.drawText(SMALL_FONT_ID, SIDE, sh - FOOTER - 42, feedback_.data());
+  } else if (screen_ == Screen::Menu) {
+    static constexpr StrId WEATHER_HELP[] = {
+        StrId::STR_FARM_WEATHER_CLEAR_HELP,
+        StrId::STR_FARM_WEATHER_CLOUDY_HELP,
+        StrId::STR_FARM_WEATHER_RAIN_HELP,
+        StrId::STR_FARM_WEATHER_SNOW_HELP,
+    };
+    renderer.drawText(SMALL_FONT_ID, SIDE, sh - FOOTER - 42,
+                      I18N.get(WEATHER_HELP[static_cast<uint8_t>(FARM_STATE.weatherEffect())]));
+  }
   if (screen_ == Screen::Care) {
     char credits[64];
     snprintf(credits, sizeof(credits), "%s: %u/5", tr(STR_FARM_CARE_CREDITS), FARM_STATE.careCreditCount());

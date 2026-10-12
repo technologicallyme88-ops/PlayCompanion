@@ -280,20 +280,24 @@ void KOReaderSyncActivity::performSync() {
             documentHash.c_str(), localProgress.percentage, remoteProgress.percentage, delta,
             remoteProgress.progress.c_str(), remotePosition.spineIndex, remotePosition.pageNumber);
     if (std::fabs(delta) <= SAME_PROGRESS_EPSILON) {
-      completeAlreadySynced();
-      return;
-    }
-
-    if (delta > 0) {
+      const bool sameContentAnchor = !localProgress.xpath.empty() && localProgress.xpath == remoteProgress.progress;
+      const bool sameMappedPage =
+          remotePosition.spineIndex == currentSpineIndex && remotePosition.pageNumber == currentPage;
+      if (sameContentAnchor || sameMappedPage) {
+        completeAlreadySynced();
+        return;
+      }
+      LOG_DBG("KOSync", "Near-equal percentages have different positions; asking user to resolve");
+    } else if (delta > 0) {
       // Alternate hashes are only probes for newer remote state. Keep uploads
       // on the user's configured matching method so its primary record heals.
       documentHash = primaryHash;
       performUpload();
       return;
+    } else {
+      saveProgressAndReturn(remotePosition.spineIndex, remotePosition.pageNumber);
+      return;
     }
-
-    saveProgressAndReturn(remotePosition.spineIndex, remotePosition.pageNumber);
-    return;
   }
 
   // localProgress was pre-computed in EpubReaderActivity before the Epub was released.
