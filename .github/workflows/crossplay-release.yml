@@ -110,27 +110,17 @@ jobs:
           # new in CrossPlay". A release note is a thing you write.
           generate_release_notes: false
           body: |
-            ## Pokémon and sync
+            ## Pokémon
 
-            - Catch-to-nickname navigation keeps the encounter snapshot valid, removing
-              the stray placeholder screen between catching and naming a Pokémon.
-            - KOReader Sync now asks the user to resolve near-equal percentages when the
-              local and remote content positions are actually different.
+            - Encounter screens now show the full evolution family in Pokédex order,
+              including earlier forms when an evolved Pokémon appears.
+            - Uncaught family members remain hidden as `???`, while caught and seen
+              statuses continue to reflect the local Pokédex.
 
             ## Reading journal
 
-            - Work Reading counts Wednesday night every other week, beginning with the
-              Sunday, October 4, 2026 work week; Sunday through Tuesday remain weekly.
-
-            ## Farm
-
-            - The farm overview explains each live weather modifier and shows the current
-              reading streak instead of water and fertilizer stock.
-            - Seed purchases no longer appear as bag inventory because purchased seeds are
-              planted immediately.
-            - Harvest Crops now acts directly from the main farm menu and reports the result
-              at the bottom of the page.
-            - The Shop header shows the current coin balance.
+            - Book summaries use the available author-area height for longer titles before
+              truncating them with an ellipsis.
 
             - X3, X4, and X4 Pro production images are built from the same release.
 

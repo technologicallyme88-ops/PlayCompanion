@@ -26,6 +26,7 @@ namespace fui = freeink::ui;
 namespace {
 constexpr fui::ActionId ACTION_ROW = 1;
 constexpr uint16_t STARTERS[] = {1, 4, 7, 25};
+constexpr size_t ENCOUNTER_FAMILY_CAPACITY = 8;
 
 const char* speciesName(const uint16_t id) {
   const pokemon::SpeciesData* species = pokemon::speciesData(id);
@@ -38,6 +39,34 @@ uint16_t caughtSpeciesCount(const pokemon::PokemonState& state) {
     if (pokemon::isSpeciesMarked(state.caughtSpecies, speciesId)) count++;
   }
   return count;
+}
+
+void appendEvolutionFamily(const uint16_t speciesId, std::array<uint16_t, ENCOUNTER_FAMILY_CAPACITY>& family,
+                           size_t& count) {
+  if (count >= family.size()) return;
+  family[count++] = speciesId;
+  for (const pokemon::EvolutionRule& rule : pokemon::evolutionsFor(speciesId)) {
+    appendEvolutionFamily(rule.targetSpeciesId, family, count);
+  }
+}
+
+uint16_t evolutionFamilyRoot(const uint16_t speciesId) {
+  uint16_t current = speciesId;
+  for (size_t depth = 0; depth < ENCOUNTER_FAMILY_CAPACITY; ++depth) {
+    uint16_t parent = 0;
+    for (uint16_t candidate = 1; pokemon::speciesData(candidate) != nullptr; ++candidate) {
+      for (const pokemon::EvolutionRule& rule : pokemon::evolutionsFor(candidate)) {
+        if (rule.targetSpeciesId == current) {
+          parent = candidate;
+          break;
+        }
+      }
+      if (parent != 0) break;
+    }
+    if (parent == 0) break;
+    current = parent;
+  }
+  return current;
 }
 
 int retainedPcSelection(const pokemon::PokemonSnapshot& snapshot, const int previousSelection) {
@@ -1099,11 +1128,28 @@ void PokemonActivity::renderFocused() {
     centered(renderer, UI_12_FONT_ID, contentTop + 112, line, EpdFontFamily::BOLD);
     snprintf(line, sizeof(line), "%s %u    %s", tr(STR_POKEMON_LEVEL), pending.level, genderText(pending.gender));
     centered(renderer, UI_10_FONT_ID, contentTop + 140, line);
-    const bool caught = pokemon::isSpeciesMarked(snapshot_.state.caughtSpecies, pending.speciesId);
-    const char* status = caught                                         ? tr(STR_POKEMON_CAUGHT)
-                         : pokemon::encounterWasPreviouslySeen(pending) ? tr(STR_POKEMON_SEEN)
-                                                                        : nullptr;
-    if (status != nullptr) centered(renderer, UI_10_FONT_ID, contentTop + 166, status, EpdFontFamily::BOLD);
+    std::array<uint16_t, ENCOUNTER_FAMILY_CAPACITY> family{};
+    size_t familyCount = 0;
+    appendEvolutionFamily(evolutionFamilyRoot(pending.speciesId), family, familyCount);
+    const int dexLeft = renderer.getScreenWidth() / 6;
+    const int dexRight = renderer.getScreenWidth() - dexLeft;
+    int dexY = contentTop + 176;
+    renderer.drawText(UI_10_FONT_ID, dexLeft, dexY, tr(STR_POKEDEX), true, EpdFontFamily::BOLD);
+    dexY += 28;
+    for (size_t index = 0; index < familyCount; ++index) {
+      const uint16_t speciesId = family[index];
+      const bool caught = pokemon::isSpeciesMarked(snapshot_.state.caughtSpecies, speciesId);
+      const bool seen = pokemon::isSpeciesMarked(snapshot_.state.seenSpecies, speciesId);
+      const char* status = caught ? tr(STR_POKEMON_CAUGHT) : seen ? tr(STR_POKEMON_SEEN) : nullptr;
+      const EpdFontFamily::Style style = caught ? EpdFontFamily::BOLD : EpdFontFamily::REGULAR;
+      snprintf(line, sizeof(line), "%03u  %s", speciesId, caught || seen ? speciesName(speciesId) : "???");
+      renderer.drawText(UI_10_FONT_ID, dexLeft, dexY, line, true, style);
+      if (status != nullptr) {
+        renderer.drawText(UI_10_FONT_ID, dexRight - renderer.getTextWidth(UI_10_FONT_ID, status, style), dexY, status,
+                          true, style);
+      }
+      dexY += 24;
+    }
   } else if (pending.kind == pokemon::PendingEventKind::Item) {
     pokemon::drawPokemonItemArt(renderer, pending.item, true,
                                 Rect{(renderer.getScreenWidth() - 120) / 2, contentTop + 8, 120, 90}, false);

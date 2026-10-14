@@ -819,7 +819,7 @@ void ReadingJournalActivity::drawSummary() {
   }
   const int textX = side + coverW + 18;
   const int textW = sw - side - textX;
-  UITheme::drawCenteredWrappedText(renderer, Rect{textX, heroY + 10, textW, 82}, UI_12_FONT_ID, entry.title, 3, true,
+  UITheme::drawCenteredWrappedText(renderer, Rect{textX, heroY + 10, textW, 104}, UI_12_FONT_ID, entry.title, 3, true,
                                    EpdFontFamily::BOLD);
   UITheme::drawCenteredWrappedText(renderer, Rect{textX, heroY + coverH - 72, textW, 56}, UI_10_FONT_ID,
                                    entry.author[0] ? entry.author : "UNKNOWN AUTHOR", 2);
